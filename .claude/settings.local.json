@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Out-Null *)",
+      "PowerShell(Get-ChildItem \"D:\\\\workinghard\\\\liff\\\\DearFile\" -Recurse | Select-Object -First 80 | ForEach-Object { $_.FullName })",
+      "PowerShell(Invoke-WebRequest -Uri \"http://localhost:8000\" -UseBasicParsing -TimeoutSec 5 | Select-Object StatusCode, StatusDescription)",
+      "PowerShell(New-Item *)",
+      "Bash(npm install *)",
+      "Bash(npx tsc *)",
+      "Bash(Get-ChildItem -Path \"D:\\\\workinghard\\\\liff\\\\DearFile\" -Recurse -Force)",
+      "Bash(Select-Object -Property FullName, PSIsContainer)",
+      "Bash(ConvertTo-Csv -NoTypeInformation)",
+      "Bash(Out-String)",
+      "PowerShell(Get-ChildItem -Path \"D:\\\\workinghard\\\\liff\\\\DearFile\" -Recurse -Force | Where-Object { -not $_.FullName.Contains\\('.git'\\) -and -not $_.FullName.Contains\\('node_modules'\\) } | Select-Object -Property @{Name='Type';Expression={if\\($_.PSIsContainer\\){'DIR'}else{'FILE'}}}, FullName | Format-Table -AutoSize)"
+    ]
+  }
+}
