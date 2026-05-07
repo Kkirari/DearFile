@@ -5,6 +5,7 @@ import { Home, Search, FolderOpen, User } from "lucide-react";
 import { HomeTab } from "@/components/screens/home-tab";
 import { FoldersTab } from "@/components/screens/folders-tab";
 import { ProfileTab } from "@/components/screens/profile-tab";
+import { SearchScreen } from "@/components/screens/search-screen";
 import { UploadFab } from "@/components/upload-fab";
 import { useFiles } from "@/hooks/use-files";
 import { useFolders } from "@/hooks/use-folders";
@@ -67,12 +68,14 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
           pictureUrl={pictureUrl}
           files={files}
           folders={folders}
+          onDataReset={() => { refreshFiles(); refreshFolders(); }}
         />
       )}
       {activeNav === "search" && (
-        <div className="flex min-h-dvh items-center justify-center text-sm text-[#b0a396]">
-          Coming soon
-        </div>
+        <SearchScreen
+          onBack={() => setActiveNav("home")}
+          folders={folders}
+        />
       )}
 
       {/* ── UPLOAD FAB ── */}

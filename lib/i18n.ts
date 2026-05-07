@@ -23,6 +23,13 @@ export const t = {
     noFolders:     "No folders yet — create one in Folders tab.",
     noFiles:       "No files yet — upload one!",
     searchPlaceholder: "Search files...",
+    searchTitle:       "Search",
+    searchBack:        "Back",
+    searchEmpty:       "Type to search your files…",
+    searchNoResults:   "No results for",
+    searchCategories:  "Browse by category",
+    searchResultCount: "result",
+    searchResultCountPlural: "results",
 
     // Profile
     lineAccount:   "LINE Account",
@@ -62,6 +69,11 @@ export const t = {
     allFolders:    "All Folders",
     noFoldersYet:  "No folders yet",
     createFirst:   "Create your first folder above.",
+
+    // Loading & errors
+    connecting:    "Connecting to LINE...",
+    error:         "Error",
+    errorLoading:  "Failed to load. Please try again.",
   },
 
   th: {
@@ -86,6 +98,13 @@ export const t = {
     noFolders:     "ยังไม่มีโฟลเดอร์ — สร้างในแท็บโฟลเดอร์",
     noFiles:       "ยังไม่มีไฟล์ — อัปโหลดได้เลย!",
     searchPlaceholder: "ค้นหาไฟล์...",
+    searchTitle:       "ค้นหา",
+    searchBack:        "กลับ",
+    searchEmpty:       "พิมพ์เพื่อค้นหาไฟล์ของคุณ…",
+    searchNoResults:   "ไม่พบผลลัพธ์สำหรับ",
+    searchCategories:  "เรียกดูตามหมวดหมู่",
+    searchResultCount: "รายการ",
+    searchResultCountPlural: "รายการ",
 
     // Profile
     lineAccount:   "บัญชี LINE",
@@ -125,5 +144,10 @@ export const t = {
     allFolders:    "โฟลเดอร์ทั้งหมด",
     noFoldersYet:  "ยังไม่มีโฟลเดอร์",
     createFirst:   "สร้างโฟลเดอร์แรกของคุณด้านบน",
+
+    // Loading & errors
+    connecting:    "กำลังเชื่อมต่อ LINE...",
+    error:         "เกิดข้อผิดพลาด",
+    errorLoading:  "ไม่สามารถโหลดได้ โปรดลองใหม่อีกครั้ง",
   },
 } satisfies Record<Lang, Record<string, string>>;

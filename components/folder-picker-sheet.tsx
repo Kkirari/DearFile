@@ -50,8 +50,9 @@ export function FolderPickerSheet({
     onFolderCreated?.();
   }
 
+  // AI folders are virtual & auto-organized — users cannot move files INTO them.
+  // Only show user folders + Inbox as valid destinations.
   const userFolders = localFolders.filter((f) => f.owner === "user");
-  const aiFolders   = localFolders.filter((f) => f.owner === "ai");
 
   if (createOpen) {
     return (
@@ -114,25 +115,13 @@ export function FolderPickerSheet({
             </>
           )}
 
-          {aiFolders.length > 0 && (
-            <>
-              <p className="mt-2 mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-[#9b869c]">
-                Organized by AI
-              </p>
-              {aiFolders.map((f) => (
-                <PickerRow
-                  key={f.id}
-                  icon={<Sparkles size={18} className="text-[#9b869c]" />}
-                  iconBg="bg-[#9b869c]/15"
-                  label={f.name}
-                  sublabel="AI folder"
-                  selected={currentFolderId === f.id}
-                  onClick={() => pick(f.id)}
-                />
-              ))}
-            </>
-          )}
         </div>
+
+        {/* AI folder hint — virtual folders, not selectable as destinations */}
+        <p className="mt-3 px-1 text-[11px] text-[#b0a396] dark:text-[#6e6460] flex items-center gap-1.5">
+          <Sparkles size={11} className="text-[#9b869c]" />
+          AI folders organize automatically — files can&apos;t be moved into them manually.
+        </p>
 
         <button
           onClick={() => setCreateOpen(true)}

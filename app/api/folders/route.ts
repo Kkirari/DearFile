@@ -6,18 +6,20 @@ import {
 } from "@aws-sdk/client-s3";
 import { s3, BUCKET } from "@/lib/s3";
 import type { FolderItem } from "@/types/folder";
+import { AI_FOLDERS } from "@/lib/ai-folders";
+import { countByAiFolder } from "@/lib/search-index";
 
 const PREFIX = "folder-meta/";
 
 export async function GET() {
   try {
+    // User folders (stored as JSON metadata files)
     const { Contents = [] } = await s3.send(
       new ListObjectsV2Command({ Bucket: BUCKET, Prefix: PREFIX })
     );
-
     const jsonKeys = Contents.filter((obj) => obj.Key?.endsWith(".json"));
 
-    const folders: FolderItem[] = await Promise.all(
+    const userFolders: FolderItem[] = await Promise.all(
       jsonKeys.map(async (obj) => {
         const res  = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: obj.Key! }));
         const body = await res.Body?.transformToString();
@@ -32,6 +34,25 @@ export async function GET() {
       })
     );
 
+    // AI folders from catalog — counts pulled from search index
+    let counts: Record<string, number> = {};
+    try {
+      counts = await countByAiFolder();
+    } catch (err) {
+      console.warn("[folders] index count failed:", err);
+    }
+
+    const aiFoldersList: FolderItem[] = AI_FOLDERS
+      .filter((f) => (counts[f.id] ?? 0) > 0) // hide empty AI folders
+      .map((f) => ({
+        id:        f.id,
+        name:      f.name,
+        count:     counts[f.id] ?? 0,
+        updatedAt: new Date().toISOString(),
+        owner:     "ai",
+      }));
+
+    const folders = [...userFolders, ...aiFoldersList];
     folders.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
     return Response.json({ folders });
   } catch (err) {

@@ -12,11 +12,12 @@ import {
   Image as ImageIcon,
   ChevronRight,
   Sparkles,
+  Inbox,
 } from "lucide-react";
 import { FolderCard } from "@/components/folder-card";
 import { FileDetailSheet } from "@/components/file-detail-sheet";
 import { ImageLightbox } from "@/components/image-lightbox";
-import { TYPE_CHIPS } from "@/lib/mock-data";
+import { FolderViewer } from "@/components/screens/folder-viewer";
 import { getFileIcon } from "@/lib/utils";
 import { useLanguage } from "@/providers/language-provider";
 import type { FileItem } from "@/types/file";
@@ -26,12 +27,12 @@ import type { FileType } from "@/lib/mock-data";
 // ── File type icon/color config ───────────────────────────────────────────────
 
 const FILE_TYPE_CONFIG: Record<FileType, { icon: React.ElementType; bg: string; color: string }> = {
-  pdf:     { icon: FileText,   bg: "bg-red-50 dark:bg-red-950/40",        color: "text-red-500"     },
-  image:   { icon: ImageIcon,  bg: "bg-blue-50 dark:bg-blue-950/40",      color: "text-blue-500"    },
-  doc:     { icon: FileText,   bg: "bg-emerald-50 dark:bg-emerald-950/40",color: "text-emerald-500" },
-  video:   { icon: Film,       bg: "bg-violet-50 dark:bg-violet-950/40",  color: "text-violet-500"  },
-  audio:   { icon: Music,      bg: "bg-pink-50 dark:bg-pink-950/40",      color: "text-pink-500"    },
-  archive: { icon: Archive,    bg: "bg-amber-50 dark:bg-amber-950/40",    color: "text-amber-500"   },
+  pdf: { icon: FileText, bg: "bg-red-50 dark:bg-red-950/40", color: "text-red-500" },
+  image: { icon: ImageIcon, bg: "bg-blue-50 dark:bg-blue-950/40", color: "text-blue-500" },
+  doc: { icon: FileText, bg: "bg-emerald-50 dark:bg-emerald-950/40", color: "text-emerald-500" },
+  video: { icon: Film, bg: "bg-violet-50 dark:bg-violet-950/40", color: "text-violet-500" },
+  audio: { icon: Music, bg: "bg-pink-50 dark:bg-pink-950/40", color: "text-pink-500" },
+  archive: { icon: Archive, bg: "bg-amber-50 dark:bg-amber-950/40", color: "text-amber-500" },
 };
 
 const HOME_FOLDER_LIMIT = 2;
@@ -53,18 +54,31 @@ interface HomeTabProps {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoading, onRefresh, folders, foldersLoading }: HomeTabProps) {
-  const [activeChip, setActiveChip]       = useState<string>("All");
-  const [selectedFile, setSelectedFile]   = useState<FileItem | null>(null);
-  const [lightboxFile, setLightboxFile]   = useState<FileItem | null>(null);
+  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+  const [lightboxFile, setLightboxFile] = useState<FileItem | null>(null);
+  const [viewingFolder, setViewingFolder] = useState<FolderItem | "inbox" | null>(null);
   const { tr } = useLanguage();
 
-  const userFolders        = folders.filter((f) => f.owner === "user");
-  const aiFolders          = folders.filter((f) => f.owner === "ai");
+  const userFolders = folders.filter((f) => f.owner === "user");
+  const aiFolders = folders.filter((f) => f.owner === "ai");
   const previewUserFolders = userFolders.slice(0, HOME_FOLDER_LIMIT);
-  const previewAiFolders   = aiFolders.slice(0, HOME_FOLDER_LIMIT);
-  const hasMoreFolders     = userFolders.length > HOME_FOLDER_LIMIT || aiFolders.length > HOME_FOLDER_LIMIT;
+  const previewAiFolders = aiFolders.slice(0, HOME_FOLDER_LIMIT);
+  const hasMoreFolders = userFolders.length > HOME_FOLDER_LIMIT || aiFolders.length > HOME_FOLDER_LIMIT;
 
-  const recentFiles = files.slice(0, RECENT_LIMIT);
+  const recentFiles  = files.slice(0, RECENT_LIMIT);
+  const unsortedCount = files.filter((f) => f.id.startsWith("uploads/")).length;
+
+  // Show folder viewer if user clicked on a folder
+  if (viewingFolder) {
+    return (
+      <FolderViewer
+        folder={viewingFolder}
+        folders={folders}
+        onBack={() => setViewingFolder(null)}
+        onFolderRefresh={onRefresh}
+      />
+    );
+  }
 
   return (
     <div className="overflow-y-auto pb-[76px]">
@@ -72,9 +86,19 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
       {/* ── HEADER ── */}
       <div className="bg-[#f4f3ee] dark:bg-[#1c1a18] px-5 pt-14 pb-5">
         <div className="flex items-center justify-between mb-4">
-          <h1 className="text-[26px] font-bold leading-none tracking-tight text-[#4a4036] dark:text-[#e8ddd4]">
-            DearFile.
-          </h1>
+          <div className="flex items-center gap-2.5">
+            <Image
+              src="/icon/icon.png"
+              alt="DearFile"
+              width={30}
+              height={30}
+              priority
+              className="h-9 w-9 rounded-lg shadow-[0_2px_8px_rgba(155,134,156,0.3)]"
+            />
+            <h1 className="text-[26px] font-bold leading-none tracking-tight text-[#4a4036] dark:text-[#e8ddd4]">
+              DearFile.
+            </h1>
+          </div>
           <div className="h-9 w-9 overflow-hidden rounded-full border border-[#e0d8cc] dark:border-[#3a3430] bg-[#9b869c]/15 flex items-center justify-center">
             {pictureUrl ? (
               <Image
@@ -90,43 +114,19 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
           </div>
         </div>
 
-        <div className="flex items-center gap-2.5 rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-[10px] shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
+        <button
+          onClick={() => onNavigate("search")}
+          className="flex w-full items-center gap-2.5 rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-[10px] shadow-[0_1px_3px_rgba(74,64,54,0.06)] text-left active:scale-[0.98] transition-transform"
+        >
           <Search size={15} className="flex-shrink-0 text-[#9b869c]" />
-          <input
-            type="text"
-            placeholder={tr.searchPlaceholder}
-            className="flex-1 bg-transparent text-sm text-[#4a4036] dark:text-[#e8ddd4] placeholder:text-[#b0a396] dark:placeholder:text-[#6e6460] outline-none"
-          />
-        </div>
+          <span className="flex-1 text-sm text-[#b0a396] dark:text-[#6e6460] select-none">
+            {tr.searchPlaceholder}
+          </span>
+        </button>
       </div>
 
-      {/* ── BROWSE BY TYPE ── */}
-      <section className="mt-1">
-        <div className="px-5 mb-3">
-          <span className="text-[15px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.browseByType}</span>
-        </div>
-        <div className="flex gap-2 px-5 overflow-x-auto scrollbar-hide pb-0.5">
-          {TYPE_CHIPS.map((chip) => {
-            const isActive = activeChip === chip;
-            return (
-              <button
-                key={chip}
-                onClick={() => setActiveChip(chip)}
-                className={`flex-shrink-0 rounded-full px-4 py-[7px] text-[13px] font-medium border transition-all ${
-                  isActive
-                    ? "bg-[#9b869c] text-white border-transparent shadow-sm"
-                    : "bg-white dark:bg-[#252220] text-[#4a4036] dark:text-[#e8ddd4] border-[#e0d8cc] dark:border-[#3a3430]"
-                }`}
-              >
-                {chip}
-              </button>
-            );
-          })}
-        </div>
-      </section>
-
       {/* ── MY FOLDERS (preview) ── */}
-      <section className="mt-6 px-5">
+      <section className="mt-2 px-5">
         <div className="flex items-center justify-between mb-4">
           <span className="text-[15px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.myFolders}</span>
           {hasMoreFolders && (
@@ -140,6 +140,23 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
           )}
         </div>
 
+        {/* Inbox / Unsorted — always visible */}
+        <button
+          onClick={() => setViewingFolder("inbox")}
+          className="card-enter mb-4 w-full flex items-center gap-3.5 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] px-4 py-3.5 shadow-[0_1px_3px_rgba(74,64,54,0.07)] text-left active:scale-[0.98] transition-transform"
+        >
+          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-[#9b869c]/10">
+            <Inbox size={18} className="text-[#9b869c]" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-[14px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.unsortedInbox}</p>
+            <p className="text-[12px] text-[#b0a396] dark:text-[#6e6460] mt-0.5">
+              {filesLoading ? "Loading…" : `${unsortedCount} ${tr.unsortedFiles}`}
+            </p>
+          </div>
+          <ChevronRight size={14} className="flex-shrink-0 text-[#b0a396] dark:text-[#6e6460]" />
+        </button>
+
         <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
           {tr.yours}
         </p>
@@ -147,9 +164,9 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
           {foldersLoading
             ? Array.from({ length: 2 }).map((_, i) => <FolderSkeleton key={i} />)
             : previewUserFolders.length === 0
-            ? <p className="col-span-2 py-3 text-[13px] text-[#b0a396] dark:text-[#6e6460]">{tr.noFolders}</p>
-            : previewUserFolders.map((folder, i) => (
-                <FolderCard key={folder.id} folder={folder} index={i} />
+              ? <p className="col-span-2 py-3 text-[13px] text-[#b0a396] dark:text-[#6e6460]">{tr.noFolders}</p>
+              : previewUserFolders.map((folder, i) => (
+                <FolderCard key={folder.id} folder={folder} index={i} onClick={() => setViewingFolder(folder)} />
               ))
           }
         </div>
@@ -166,8 +183,8 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
               {foldersLoading
                 ? Array.from({ length: 2 }).map((_, i) => <FolderSkeleton key={i} />)
                 : previewAiFolders.map((folder, i) => (
-                    <FolderCard key={folder.id} folder={folder} index={i} />
-                  ))
+                  <FolderCard key={folder.id} folder={folder} index={i} onClick={() => setViewingFolder(folder)} />
+                ))
               }
             </div>
           </>
@@ -176,19 +193,18 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
 
       {/* ── RECENT ── */}
       <section className="mt-6">
-        <div className="flex items-center justify-between px-5 mb-3">
+        <div className="px-5 mb-3">
           <span className="text-[15px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.recent}</span>
-          <button className="text-[13px] font-medium text-[#9b869c]">{tr.seeAll}</button>
         </div>
 
         <div className="flex gap-3 px-5 overflow-x-auto scrollbar-hide pb-1">
           {filesLoading
             ? Array.from({ length: 4 }).map((_, i) => <RecentSkeleton key={i} />)
             : recentFiles.length === 0
-            ? <EmptyRecent label={tr.noFiles} />
-            : recentFiles.map((file, i) => {
+              ? <EmptyRecent label={tr.noFiles} />
+              : recentFiles.map((file, i) => {
                 const type = getFileIcon(file.mimeType) as FileType;
-                const cfg  = FILE_TYPE_CONFIG[type] ?? FILE_TYPE_CONFIG.archive;
+                const cfg = FILE_TYPE_CONFIG[type] ?? FILE_TYPE_CONFIG.archive;
                 const Icon = cfg.icon;
                 const isImage = type === "image";
                 return (
@@ -254,12 +270,12 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function timeAgo(iso: string): string {
-  const diff  = Date.now() - new Date(iso).getTime();
-  const mins  = Math.floor(diff / 60_000);
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins = Math.floor(diff / 60_000);
   const hours = Math.floor(diff / 3_600_000);
-  const days  = Math.floor(diff / 86_400_000);
-  if (mins < 1)   return "Just now";
-  if (mins < 60)  return `${mins}m ago`;
+  const days = Math.floor(diff / 86_400_000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
   if (hours < 24) return `${hours}h ago`;
   return `${days}d ago`;
 }

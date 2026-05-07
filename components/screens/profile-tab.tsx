@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import {
   User,
@@ -16,6 +17,11 @@ import {
   Globe,
   Moon,
   Sun,
+  Trash2,
+  Wrench,
+  Loader2,
+  CheckCircle2,
+  AlertTriangle,
 } from "lucide-react";
 import { formatBytes, getFileIcon } from "@/lib/utils";
 import { useLanguage } from "@/providers/language-provider";
@@ -29,11 +35,44 @@ interface ProfileTabProps {
   pictureUrl?: string;
   files: FileItem[];
   folders: FolderItem[];
+  onDataReset?: () => void;
 }
 
-export function ProfileTab({ displayName, pictureUrl, files, folders }: ProfileTabProps) {
+type FormatState = "idle" | "confirm" | "running" | "done" | "error";
+
+export function ProfileTab({ displayName, pictureUrl, files, folders, onDataReset }: ProfileTabProps) {
   const { lang, setLang, tr } = useLanguage();
   const { theme, setTheme }   = useTheme();
+
+  const [formatState, setFormatState] = useState<FormatState>("idle");
+  const [formatDeleted, setFormatDeleted] = useState(0);
+
+  async function handleFormat() {
+    if (formatState === "idle") {
+      // First tap — arm the destructive action
+      setFormatState("confirm");
+      setTimeout(() => {
+        setFormatState((s) => (s === "confirm" ? "idle" : s));
+      }, 4000);
+      return;
+    }
+    if (formatState !== "confirm") return;
+
+    setFormatState("running");
+    try {
+      const res  = await fetch("/api/admin/format", { method: "POST" });
+      const data = await res.json() as { ok?: boolean; deleted?: number; error?: string };
+      if (!data.ok) throw new Error(data.error ?? "Format failed");
+      setFormatDeleted(data.deleted ?? 0);
+      setFormatState("done");
+      onDataReset?.();
+      setTimeout(() => setFormatState("idle"), 3000);
+    } catch (err) {
+      console.error(err);
+      setFormatState("error");
+      setTimeout(() => setFormatState("idle"), 3000);
+    }
+  }
 
   const totalSize   = files.reduce((sum, f) => sum + (f.size ?? 0), 0);
   const userFolders = folders.filter((f) => f.owner === "user");
@@ -92,7 +131,7 @@ export function ProfileTab({ displayName, pictureUrl, files, folders }: ProfileT
       </div>
 
       {/* ── STATS ROW ── */}
-      <section className="px-5 -mt-2">
+      <section className="px-5 mb-2">
         <div className="grid grid-cols-3 gap-3">
           <StatCard value={files.length} label={tr.files} />
           <StatCard value={folders.length} label={tr.folders} />
@@ -101,7 +140,7 @@ export function ProfileTab({ displayName, pictureUrl, files, folders }: ProfileT
       </section>
 
       {/* ── STORAGE BAR ── */}
-      <section className="px-5 mt-5">
+      <section className="px-5 mt-8">
         <div className="rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] p-4 shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -219,6 +258,79 @@ export function ProfileTab({ displayName, pictureUrl, files, folders }: ProfileT
               ))}
             </div>
           </div>
+        </div>
+      </section>
+
+      {/* ── DEVELOPER ── */}
+      <section className="px-5 mt-5">
+        <div className="mb-3 flex items-center gap-1.5">
+          <Wrench size={12} className="text-[#9b869c]" />
+          <p className="text-[13px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">Developer</p>
+          <span className="ml-1 rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+            Debug
+          </span>
+        </div>
+        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
+          <button
+            onClick={handleFormat}
+            disabled={formatState === "running"}
+            className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors disabled:cursor-not-allowed ${
+              formatState === "confirm"
+                ? "bg-red-500 active:bg-red-600"
+                : formatState === "running"
+                ? "bg-[#f4f3ee] dark:bg-[#2a2724]"
+                : formatState === "done"
+                ? "bg-emerald-50 dark:bg-emerald-950/30"
+                : formatState === "error"
+                ? "bg-red-50 dark:bg-red-950/30"
+                : "active:bg-red-50 dark:active:bg-red-950/30"
+            }`}
+          >
+            <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-colors ${
+              formatState === "confirm"
+                ? "bg-white/20"
+                : formatState === "done"
+                ? "bg-emerald-100 dark:bg-emerald-900/40"
+                : formatState === "error"
+                ? "bg-red-100 dark:bg-red-900/40"
+                : "bg-red-50 dark:bg-red-950/40"
+            }`}>
+              {formatState === "running"
+                ? <Loader2 size={14} className="text-[#9b869c] animate-spin" />
+                : formatState === "done"
+                ? <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400" />
+                : formatState === "error"
+                ? <AlertTriangle size={14} className="text-red-500" />
+                : <Trash2 size={14} className={formatState === "confirm" ? "text-white" : "text-red-500"} />
+              }
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className={`text-[13px] font-semibold leading-tight ${
+                formatState === "confirm"
+                  ? "text-white"
+                  : formatState === "done"
+                  ? "text-emerald-700 dark:text-emerald-400"
+                  : formatState === "error"
+                  ? "text-red-600 dark:text-red-400"
+                  : "text-red-500"
+              }`}>
+                {formatState === "running" ? "Wiping bucket…"
+                  : formatState === "done"  ? `Wiped ${formatDeleted} object${formatDeleted === 1 ? "" : "s"}`
+                  : formatState === "error" ? "Format failed — check logs"
+                  : formatState === "confirm" ? "Tap again to confirm"
+                  : "Format All Data"}
+              </p>
+              <p className={`mt-0.5 text-[11px] leading-tight ${
+                formatState === "confirm"
+                  ? "text-white/85"
+                  : "text-[#b0a396] dark:text-[#6e6460]"
+              }`}>
+                {formatState === "confirm"
+                  ? "Deletes ALL files, folders & search index. Irreversible."
+                  : "Erase every file, folder, and the search index"}
+              </p>
+            </div>
+          </button>
         </div>
       </section>
 

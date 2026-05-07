@@ -17,10 +17,12 @@ import { invokeHaiku, type ContentBlock } from "./bedrock";
 // ── Public types ──────────────────────────────────────────────────────────────
 
 export interface FileAnalysis {
-  category: string;
-  subject: string;
-  detail: string;
+  category: string;            // photo | document | finance | academic
+  type: string;                // sub-type (animal, food, receipt, slide, ...)
+  subject: string;             // kebab-case English topic
+  detail: string;              // one-line description
   date: string | null;
+  keywords: string[];          // mixed Thai + English for search
   suggested_filename: string;
   via: "metadata" | "claude" | "fallback";
 }
@@ -37,15 +39,25 @@ const SYSTEM_PROMPT = `You are a file categorization assistant for a document ma
 Analyze the file content and return ONLY a JSON object — no extra text, no markdown fences.
 
 Required fields:
-  category   – one of: receipt, invoice, contract, report, certificate, form, photo, document, other
+  category   – one of: photo, document, finance, academic
+  type       – sub-type within the category. Use one of:
+                photo:    general | people | animal | food | place | screenshot
+                document: contract | report | general
+                finance:  receipt | invoice | statement
+                academic: exam | worksheet | slide | research | general
   subject    – 3-5 word descriptive topic in English (kebab-case, e.g. "monthly-sales-report")
-  detail     – one sentence describing the content
-  date       – date found in content formatted as "DD-M-YY" (e.g. "06-5-26"), or null
+  detail     – one sentence describing the content (English)
+  date       – date found in content as "DD-M-YY" (e.g. "06-5-26"), or null if none
+  keywords   – array of 4-8 search keywords MIXED Thai and English combined
+                (e.g. ["ใบเสร็จ","กาแฟ","starbucks","receipt","coffee"])
+                Include topic words, type, and any specific subjects (school subject, brand, etc.)
   suggested_filename – [category]_[subject]_[DD-M-YY].[ext] or [category]_[subject].[ext] if no date
 
 STRICT RULES:
 - NEVER include person names, pet names, or any identifiable individual names in any field.
-- subject and suggested_filename must use only lowercase letters, digits, and hyphens.
+- For animals: identify species (cat, dog, bird) but never the animal's name.
+- subject and suggested_filename: only lowercase a-z, digits, hyphens.
+- keywords: arbitrary Thai/English allowed.
 - Return only the JSON object.`;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -157,9 +169,11 @@ async function callClaude(
     console.warn("[analyzer] Claude API error, falling back:", msg);
     return {
       category: "document",
+      type: "general",
       subject: "untitled",
       detail: "AI analysis unavailable",
       date: knownDate,
+      keywords: [],
       suggested_filename: buildFilename("document", "untitled", knownDate, ext),
       via: "fallback",
     };
@@ -170,15 +184,17 @@ async function callClaude(
 
   const parsed = JSON.parse(jsonMatch[0]) as Partial<FileAnalysis>;
   const date = parsed.date ?? knownDate;
+  const category = parsed.category ?? "document";
+  const subject = parsed.subject ?? "untitled";
 
   return {
-    category: parsed.category ?? "document",
-    subject: parsed.subject ?? "untitled",
+    category,
+    type: parsed.type ?? "general",
+    subject,
     detail: parsed.detail ?? "",
     date,
-    suggested_filename:
-      parsed.suggested_filename ??
-      buildFilename(parsed.category ?? "document", parsed.subject ?? "untitled", date, ext),
+    keywords: Array.isArray(parsed.keywords) ? parsed.keywords.filter((k) => typeof k === "string" && k.trim().length > 0).slice(0, 12) : [],
+    suggested_filename: parsed.suggested_filename ?? buildFilename(category, subject, date, ext),
     via: "claude",
   };
 }
@@ -211,9 +227,11 @@ async function analyzeImage(buffer: Buffer, ext: string): Promise<FileAnalysis> 
   if (description.length > 3 && exifDate) {
     return {
       category: "photo",
+      type: "general",
       subject: description,
       detail: "Photo with EXIF metadata",
       date: exifDate,
+      keywords: description.split(/\s+/).filter((w) => w.length > 1).slice(0, 6),
       suggested_filename: buildFilename("photo", description, exifDate, ext),
       via: "metadata",
     };
@@ -223,9 +241,11 @@ async function analyzeImage(buffer: Buffer, ext: string): Promise<FileAnalysis> 
   if (buffer.length > MAX_IMAGE_BYTES_FOR_AI) {
     return {
       category: "photo",
+      type: "general",
       subject: "untitled-photo",
       detail: "Image too large for AI analysis",
       date: exifDate,
+      keywords: [],
       suggested_filename: buildFilename("photo", "untitled-photo", exifDate, ext),
       via: "fallback",
     };
@@ -281,11 +301,14 @@ async function analyzePdf(buffer: Buffer): Promise<FileAnalysis> {
   // Sufficient: has a real title
   if (title.length > 2) {
     const category = guessCategory(`${title} ${subject}`);
+    const kw = `${title} ${subject}`.split(/[\s,;]+/).filter((w) => w.length > 1).slice(0, 8);
     return {
       category,
+      type: "general",
       subject: title,
       detail: [author && `Author: ${author}`, subject].filter(Boolean).join(" · ") || "Digital PDF",
       date,
+      keywords: kw,
       suggested_filename: buildFilename(category, title, date, "pdf"),
       via: "metadata",
     };
@@ -325,11 +348,14 @@ async function analyzeDocx(buffer: Buffer): Promise<FileAnalysis> {
   // Sufficient: non-trivial title
   if (title.length > 2) {
     const category = guessCategory(`${title} ${description}`);
+    const kw = `${title} ${description}`.split(/[\s,;]+/).filter((w) => w.length > 1).slice(0, 8);
     return {
       category,
+      type: "general",
       subject: title,
       detail: description || "Word document",
       date,
+      keywords: kw,
       suggested_filename: buildFilename(category, title, date, "docx"),
       via: "metadata",
     };

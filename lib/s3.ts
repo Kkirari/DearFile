@@ -1,4 +1,10 @@
-import { S3Client, CopyObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  CopyObjectCommand,
+  DeleteObjectCommand,
+  PutObjectTaggingCommand,
+  GetObjectTaggingCommand,
+} from "@aws-sdk/client-s3";
 
 export const s3 = new S3Client({
   region: process.env.AWS_REGION!,
@@ -39,6 +45,35 @@ export async function renameS3Object(oldKey: string, newFilename: string): Promi
   }));
 
   return newKey;
+}
+
+/**
+ * S3 object tags: only ASCII allowed (letters, digits, space, + - = . _ : / @).
+ * Sanitize aggressively — Thai/emoji must live in the search index, not tags.
+ */
+function sanitizeTagValue(val: string): string {
+  return val.replace(/[^a-zA-Z0-9\s+\-=._:/@]/g, "").trim().slice(0, 256);
+}
+
+export async function setS3ObjectTags(key: string, tags: Record<string, string>): Promise<void> {
+  const TagSet = Object.entries(tags)
+    .map(([Key, Value]) => ({ Key, Value: sanitizeTagValue(Value) }))
+    .filter((t) => t.Value.length > 0);
+
+  await s3.send(new PutObjectTaggingCommand({
+    Bucket:  BUCKET,
+    Key:     key,
+    Tagging: { TagSet },
+  }));
+}
+
+export async function getS3ObjectTags(key: string): Promise<Record<string, string>> {
+  const res = await s3.send(new GetObjectTaggingCommand({ Bucket: BUCKET, Key: key }));
+  const out: Record<string, string> = {};
+  for (const { Key, Value } of res.TagSet ?? []) {
+    if (Key && Value !== undefined) out[Key] = Value;
+  }
+  return out;
 }
 
 /** Infer MIME type from filename extension (used when listing S3 objects) */

@@ -20,7 +20,10 @@
       "Bash(node -e \"const m = require\\('pdf-parse'\\); console.log\\(JSON.stringify\\(Object.keys\\(m\\)\\)\\)\")",
       "Bash(python3 -c \"import json,sys; p=json.load\\(sys.stdin\\); print\\(p.get\\('version'\\), p.get\\('main'\\), p.get\\('exports',{}\\).get\\('.',{}\\)\\)\")",
       "Bash(node -e \"const m = require\\('pdf-parse'\\); const p = new m.PDFParse\\(\\); console.log\\(Object.keys\\(p\\).slice\\(0,5\\)\\)\")",
-      "Bash(node -e \"const p = require\\('pdf-parse'\\); console.log\\(typeof p, p.name || 'fn'\\)\")"
+      "Bash(node -e \"const p = require\\('pdf-parse'\\); console.log\\(typeof p, p.name || 'fn'\\)\")",
+      "Bash(New-Item -ItemType Directory -Force -Path \"D:\\\\workinghard\\\\liff\\\\DearFile\\\\app\\\\api\\\\search\")",
+      "Bash(\"ok\")",
+      "PowerShell(\"ok\")"
     ]
   }
 }

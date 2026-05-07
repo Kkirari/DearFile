@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ChevronLeft, FolderOpen, Inbox,
   FileText, Film, Music, Archive, Image as ImageIcon, File,
+  List, LayoutGrid,
 } from "lucide-react";
 import { useFiles } from "@/hooks/use-files";
 import { FileDetailSheet } from "@/components/file-detail-sheet";
@@ -11,6 +12,8 @@ import { ImageLightbox } from "@/components/image-lightbox";
 import { formatBytes, getFileIcon } from "@/lib/utils";
 import type { FolderItem } from "@/types/folder";
 import type { FileItem } from "@/types/file";
+
+type ViewMode = "list" | "grid";
 
 // ── Type config ───────────────────────────────────────────────────────────────
 
@@ -44,6 +47,18 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
   const { files, loading, refresh } = useFiles(folderId);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [lightboxFile, setLightboxFile] = useState<FileItem | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>("list");
+
+  // Load saved view preference from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("folderViewMode") as ViewMode | null;
+    if (saved === "list" || saved === "grid") setViewMode(saved);
+  }, []);
+
+  function changeViewMode(mode: ViewMode) {
+    setViewMode(mode);
+    localStorage.setItem("folderViewMode", mode);
+  }
 
   function timeAgo(iso: string): string {
     const diff  = Date.now() - new Date(iso).getTime();
@@ -78,22 +93,58 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
             </p>
           )}
         </div>
-        {isInbox && (
+
+        {/* View mode toggle */}
+        {files.length > 0 && (
+          <div className="flex items-center gap-0.5 rounded-full border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] p-0.5 shadow-sm">
+            <button
+              onClick={() => changeViewMode("list")}
+              aria-label="List view"
+              className={`flex h-8 w-8 items-center justify-center rounded-full transition-all ${
+                viewMode === "list"
+                  ? "bg-[#9b869c] text-white shadow-sm"
+                  : "text-[#b0a396] dark:text-[#6e6460] active:bg-[#f4f3ee] dark:active:bg-[#2a2724]"
+              }`}
+            >
+              <List size={15} strokeWidth={viewMode === "list" ? 2.5 : 2} />
+            </button>
+            <button
+              onClick={() => changeViewMode("grid")}
+              aria-label="Grid view"
+              className={`flex h-8 w-8 items-center justify-center rounded-full transition-all ${
+                viewMode === "grid"
+                  ? "bg-[#9b869c] text-white shadow-sm"
+                  : "text-[#b0a396] dark:text-[#6e6460] active:bg-[#f4f3ee] dark:active:bg-[#2a2724]"
+              }`}
+            >
+              <LayoutGrid size={14} strokeWidth={viewMode === "grid" ? 2.5 : 2} />
+            </button>
+          </div>
+        )}
+
+        {isInbox && files.length === 0 && (
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#9b869c]/10">
             <Inbox size={18} className="text-[#9b869c]" />
           </div>
         )}
       </div>
 
-      {/* ── FILE LIST ── */}
+      {/* ── FILE LIST/GRID ── */}
       <div className="flex-1 overflow-y-auto pb-[76px] px-4">
         {loading ? (
-          <div className="flex flex-col gap-2.5 pt-2">
-            {Array.from({ length: 5 }).map((_, i) => <FileSkeleton key={i} />)}
-          </div>
+          viewMode === "list" ? (
+            <div className="flex flex-col gap-2.5 pt-2">
+              {Array.from({ length: 5 }).map((_, i) => <FileSkeleton key={i} />)}
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              {Array.from({ length: 4 }).map((_, i) => <FileGridSkeleton key={i} />)}
+            </div>
+          )
         ) : files.length === 0 ? (
           <EmptyViewer isInbox={isInbox} folderName={folderName} />
-        ) : (
+        ) : viewMode === "list" ? (
+          // ── LIST VIEW ──
           <div className="flex flex-col gap-2 pt-2">
             {files.map((file, i) => {
               const type = getFileIcon(file.mimeType) as keyof typeof TYPE_CONFIG;
@@ -130,6 +181,61 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
               );
             })}
           </div>
+        ) : (
+          // ── GRID VIEW (uniform 1:1 cards with overlay label) ──
+          <div className="grid grid-cols-2 gap-3 pt-2">
+            {files.map((file, i) => {
+              const type = getFileIcon(file.mimeType) as keyof typeof TYPE_CONFIG;
+              const cfg  = TYPE_CONFIG[type] ?? TYPE_CONFIG.file;
+              const Icon = cfg.icon;
+              const isImage = type === "image";
+
+              return (
+                <button
+                  key={file.id}
+                  onClick={() => setSelectedFile(file)}
+                  className="card-enter relative aspect-square w-full overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)] active:scale-[0.97] transition-transform"
+                  style={{ animationDelay: `${i * 35}ms` }}
+                >
+                  {/* Thumbnail (fills entire card) */}
+                  {isImage ? (
+                    <img
+                      src={file.url}
+                      alt={file.name}
+                      className="absolute inset-0 h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className={`absolute inset-0 flex items-center justify-center ${cfg.bg}`}>
+                      <Icon size={56} className={cfg.color} strokeWidth={1.4} />
+                    </div>
+                  )}
+
+                  {/* Gradient overlay (only for images, for label legibility) */}
+                  {isImage && (
+                    <div className="absolute inset-x-0 bottom-0 h-[55%] bg-gradient-to-t from-black/75 via-black/35 to-transparent pointer-events-none" />
+                  )}
+
+                  {/* Label (overlaid at bottom) */}
+                  <div className="absolute inset-x-0 bottom-0 px-3 py-2.5 text-left">
+                    <p className={`text-[12.5px] font-semibold truncate leading-tight ${
+                      isImage
+                        ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
+                        : "text-[#4a4036] dark:text-[#e8ddd4]"
+                    }`}>
+                      {file.name}
+                    </p>
+                    <p className={`text-[10.5px] mt-0.5 truncate ${
+                      isImage
+                        ? "text-white/85 drop-shadow-[0_1px_2px_rgba(0,0,0,0.6)]"
+                        : "text-[#b0a396] dark:text-[#6e6460]"
+                    }`}>
+                      {formatBytes(file.size)} · {timeAgo(file.createdAt)}
+                    </p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         )}
       </div>
 
@@ -157,6 +263,17 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+function FileGridSkeleton() {
+  return (
+    <div className="relative aspect-square w-full overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#e0d8cc]/40 dark:bg-[#3a3430]/40 animate-pulse">
+      <div className="absolute inset-x-0 bottom-0 px-3 py-2.5 space-y-1.5">
+        <div className="h-3 w-4/5 rounded bg-[#e0d8cc]/80 dark:bg-[#3a3430]/80" />
+        <div className="h-2.5 w-1/2 rounded bg-[#e0d8cc]/80 dark:bg-[#3a3430]/80" />
+      </div>
+    </div>
+  );
+}
 
 function FileSkeleton() {
   return (

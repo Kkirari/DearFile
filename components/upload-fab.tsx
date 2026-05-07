@@ -117,16 +117,18 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
 
       setUploadState("done");
 
-      // Auto-rename: analyze + rename in S3, non-blocking
+      // Auto-analyze: rename + tag + index in S3, non-blocking
       try {
-        const ar = await fetch("/api/analyze", {
+        await fetch("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ key }),
         });
-        // rename happens server-side — no UI feedback needed
+        // After analyze the search index is updated → refresh folders so
+        // AI folder counts reflect the newly categorized file
+        onFolderRefresh?.();
       } catch {
-        // rename failure is non-fatal — file stays with original name
+        // non-fatal — file stays with original name, no AI folder assigned
       }
 
       onUploadComplete?.();
