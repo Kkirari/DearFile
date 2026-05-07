@@ -11,7 +11,16 @@
       "Bash(Select-Object -Property FullName, PSIsContainer)",
       "Bash(ConvertTo-Csv -NoTypeInformation)",
       "Bash(Out-String)",
-      "PowerShell(Get-ChildItem -Path \"D:\\\\workinghard\\\\liff\\\\DearFile\" -Recurse -Force | Where-Object { -not $_.FullName.Contains\\('.git'\\) -and -not $_.FullName.Contains\\('node_modules'\\) } | Select-Object -Property @{Name='Type';Expression={if\\($_.PSIsContainer\\){'DIR'}else{'FILE'}}}, FullName | Format-Table -AutoSize)"
+      "PowerShell(Get-ChildItem -Path \"D:\\\\workinghard\\\\liff\\\\DearFile\" -Recurse -Force | Where-Object { -not $_.FullName.Contains\\('.git'\\) -and -not $_.FullName.Contains\\('node_modules'\\) } | Select-Object -Property @{Name='Type';Expression={if\\($_.PSIsContainer\\){'DIR'}else{'FILE'}}}, FullName | Format-Table -AutoSize)",
+      "Bash(New-Item -ItemType Directory -Force -Path \"D:\\\\workinghard\\\\liff\\\\DearFile\\\\app\\\\api\\\\analyze\")",
+      "Bash(Out-Null)",
+      "Bash(Write-Output \"ok\")",
+      "Bash(node -e \"const m = require\\('pdf-parse'\\); console.log\\(typeof m, Object.keys\\(m\\).slice\\(0,5\\)\\)\")",
+      "Bash(node -e \"const m = require\\('pdf-parse'\\); console.log\\(typeof m, typeof m.default, typeof m.parse\\)\")",
+      "Bash(node -e \"const m = require\\('pdf-parse'\\); console.log\\(JSON.stringify\\(Object.keys\\(m\\)\\)\\)\")",
+      "Bash(python3 -c \"import json,sys; p=json.load\\(sys.stdin\\); print\\(p.get\\('version'\\), p.get\\('main'\\), p.get\\('exports',{}\\).get\\('.',{}\\)\\)\")",
+      "Bash(node -e \"const m = require\\('pdf-parse'\\); const p = new m.PDFParse\\(\\); console.log\\(Object.keys\\(p\\).slice\\(0,5\\)\\)\")",
+      "Bash(node -e \"const p = require\\('pdf-parse'\\); console.log\\(typeof p, p.name || 'fn'\\)\")"
     ]
   }
 }

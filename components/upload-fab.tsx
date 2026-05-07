@@ -59,8 +59,6 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef  = useRef<HTMLInputElement>(null);
 
-  // ── Sheet open/close ────────────────────────────────────────────────────────
-
   function openSheet() {
     if (uploadState === "uploading") return;
     setIsClosing(false);
@@ -74,8 +72,6 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
       setIsClosing(false);
     }, 260);
   }
-
-  // ── File picked — show folder picker before uploading ──────────────────────
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -99,8 +95,6 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
     setPendingFile(null);
   }
 
-  // ── Upload ──────────────────────────────────────────────────────────────────
-
   async function startUpload(file: File, folderId: string | null) {
     setUploadState("uploading");
     setProgress(0);
@@ -117,11 +111,24 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
         }),
       });
       if (!res.ok) throw new Error("Could not get upload URL");
-      const { uploadUrl } = await res.json() as { uploadUrl: string; key: string };
+      const { uploadUrl, key } = await res.json() as { uploadUrl: string; key: string };
 
       await uploadToS3(uploadUrl, file, setProgress);
 
       setUploadState("done");
+
+      // Auto-rename: analyze + rename in S3, non-blocking
+      try {
+        const ar = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key }),
+        });
+        // rename happens server-side — no UI feedback needed
+      } catch {
+        // rename failure is non-fatal — file stays with original name
+      }
+
       onUploadComplete?.();
       setTimeout(() => setUploadState("idle"), 2000);
     } catch (err) {
@@ -130,8 +137,6 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
       setTimeout(() => { setUploadState("idle"); setErrorMsg(null); }, 3000);
     }
   }
-
-  // ── FAB appearance ─────────────────────────────────────────────────────────
 
   const fabBg =
     uploadState === "error" ? "bg-red-500 shadow-red-300/50" :
@@ -167,6 +172,7 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
         </button>
       </div>
 
+
       {/* Error tooltip */}
       {uploadState === "error" && errorMsg && (
         <div className="fixed bottom-[154px] right-4 z-[55] max-w-[200px] rounded-xl bg-red-500 px-3 py-2 text-[11px] text-white shadow-lg">
@@ -182,15 +188,15 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
             onClick={closeSheet}
           />
           <div
-            className={`fixed bottom-0 left-0 right-0 z-[60] rounded-t-[28px] bg-white px-5 pt-4 pb-[calc(28px+env(safe-area-inset-bottom,0px))] shadow-2xl ${isClosing ? "sheet-exit" : "sheet-enter"}`}
+            className={`fixed bottom-0 left-0 right-0 z-[60] rounded-t-[28px] bg-white dark:bg-[#252220] px-5 pt-4 pb-[calc(28px+env(safe-area-inset-bottom,0px))] shadow-2xl ${isClosing ? "sheet-exit" : "sheet-enter"}`}
           >
-            <div className="mx-auto mb-5 h-[5px] w-10 rounded-full bg-[#e0d8cc]" />
+            <div className="mx-auto mb-5 h-[5px] w-10 rounded-full bg-[#e0d8cc] dark:bg-[#3a3430]" />
 
             <div className="mb-5 flex items-center justify-between">
-              <h3 className="text-[17px] font-bold text-[#4a4036]">Upload File</h3>
+              <h3 className="text-[17px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">Upload File</h3>
               <button
                 onClick={closeSheet}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f4f3ee] text-[#b0a396] transition-colors active:bg-[#e0d8cc]"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f4f3ee] dark:bg-[#2a2724] text-[#b0a396] dark:text-[#6e6460] transition-colors active:bg-[#e0d8cc] dark:active:bg-[#3a3430]"
               >
                 <X size={16} />
               </button>
@@ -206,14 +212,14 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
               />
               <SheetOption index={1}
                 icon={<ImageIcon size={21} className="text-blue-500" />}
-                iconBg="bg-blue-50"
+                iconBg="bg-blue-50 dark:bg-blue-950/40"
                 title="Photo Library"
                 subtitle="Choose from your gallery"
                 onClick={() => galleryInputRef.current?.click()}
               />
               <SheetOption index={2}
                 icon={<Camera size={21} className="text-emerald-500" />}
-                iconBg="bg-emerald-50"
+                iconBg="bg-emerald-50 dark:bg-emerald-950/40"
                 title="Take Photo"
                 subtitle="Use your camera directly"
                 onClick={() => cameraInputRef.current?.click()}
@@ -254,15 +260,15 @@ function SheetOption({
   return (
     <button
       onClick={onClick}
-      className="card-enter flex items-center gap-3.5 rounded-2xl border border-[#e0d8cc] bg-[#f4f3ee]/50 p-4 text-left transition-colors active:bg-[#f4f3ee]"
+      className="card-enter flex items-center gap-3.5 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#f4f3ee]/50 dark:bg-[#2a2724]/50 p-4 text-left transition-colors active:bg-[#f4f3ee] dark:active:bg-[#2a2724]"
       style={{ animationDelay: `${80 + index * 65}ms` }}
     >
       <div className={`flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl ${iconBg}`}>
         {icon}
       </div>
       <div>
-        <p className="text-[14px] font-semibold text-[#4a4036]">{title}</p>
-        <p className="text-[12px] text-[#b0a396]">{subtitle}</p>
+        <p className="text-[14px] font-semibold text-[#4a4036] dark:text-[#e8ddd4]">{title}</p>
+        <p className="text-[12px] text-[#b0a396] dark:text-[#6e6460]">{subtitle}</p>
       </div>
     </button>
   );

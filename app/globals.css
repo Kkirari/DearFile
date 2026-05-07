@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-background: #f4f3ee;
   --color-foreground: #4a4036;
@@ -43,6 +45,14 @@ body {
   background-image:
     radial-gradient(ellipse 80% 50% at 10% 0%, rgba(155, 134, 156, 0.07) 0%, transparent 60%),
     radial-gradient(ellipse 60% 60% at 90% 100%, rgba(176, 163, 150, 0.06) 0%, transparent 60%);
+}
+
+.dark body {
+  background: #1c1a18;
+  color: #e8ddd4;
+  background-image:
+    radial-gradient(ellipse 80% 50% at 10% 0%, rgba(155, 134, 156, 0.05) 0%, transparent 60%),
+    radial-gradient(ellipse 60% 60% at 90% 100%, rgba(155, 134, 156, 0.04) 0%, transparent 60%);
 }
 
 .card-enter {

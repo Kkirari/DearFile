@@ -83,21 +83,21 @@ export function FolderActionsSheet({
         onClick={close}
       />
       <div
-        className={`fixed bottom-0 left-0 right-0 z-[70] rounded-t-[28px] bg-white px-5 pt-4 pb-[calc(32px+env(safe-area-inset-bottom,0px))] shadow-2xl ${isClosing ? "sheet-exit" : "sheet-enter"}`}
+        className={`fixed bottom-0 left-0 right-0 z-[70] rounded-t-[28px] bg-white dark:bg-[#252220] px-5 pt-4 pb-[calc(32px+env(safe-area-inset-bottom,0px))] shadow-2xl ${isClosing ? "sheet-exit" : "sheet-enter"}`}
       >
-        <div className="mx-auto mb-5 h-[5px] w-10 rounded-full bg-[#e0d8cc]" />
+        <div className="mx-auto mb-5 h-[5px] w-10 rounded-full bg-[#e0d8cc] dark:bg-[#3a3430]" />
 
         {/* Header */}
         <div className="flex items-center justify-between mb-5">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#b0a396]">Folder</p>
-            <h3 className="text-[17px] font-bold text-[#4a4036] truncate max-w-[220px]">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">Folder</p>
+            <h3 className="text-[17px] font-bold text-[#4a4036] dark:text-[#e8ddd4] truncate max-w-[220px]">
               {folder.name}
             </h3>
           </div>
           <button
             onClick={close}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f4f3ee] text-[#b0a396] active:bg-[#e0d8cc]"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f4f3ee] dark:bg-[#2a2724] text-[#b0a396] dark:text-[#6e6460] active:bg-[#e0d8cc] dark:active:bg-[#3a3430]"
           >
             <X size={16} />
           </button>
@@ -116,14 +116,14 @@ export function FolderActionsSheet({
             <ActionRow
               icon={<Pencil size={19} />}
               label="Rename"
-              bg="bg-[#f4f3ee]"
-              textColor="text-[#4a4036]"
+              bg="bg-[#f4f3ee] dark:bg-[#2a2724]"
+              textColor="text-[#4a4036] dark:text-[#e8ddd4]"
               onClick={() => setView("rename")}
             />
             <ActionRow
               icon={<Trash2 size={19} />}
               label={confirmDelete ? "Tap again to confirm delete" : deleting ? "Deleting…" : "Delete Folder"}
-              bg={confirmDelete ? "bg-red-500" : "bg-red-50"}
+              bg={confirmDelete ? "bg-red-500" : "bg-red-50 dark:bg-red-950/40"}
               textColor={confirmDelete ? "text-white" : "text-red-500"}
               onClick={handleDelete}
               disabled={deleting}
@@ -141,13 +141,13 @@ export function FolderActionsSheet({
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") handleRename(); if (e.key === "Escape") setView("menu"); }}
               maxLength={64}
-              className="w-full rounded-2xl border border-[#e0d8cc] bg-[#f4f3ee] px-4 py-3.5 text-[15px] text-[#4a4036] placeholder:text-[#b0a396] outline-none focus:border-[#9b869c] transition-colors mb-3"
+              className="w-full rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#f4f3ee] dark:bg-[#2a2724] px-4 py-3.5 text-[15px] text-[#4a4036] dark:text-[#e8ddd4] placeholder:text-[#b0a396] dark:placeholder:text-[#6e6460] outline-none focus:border-[#9b869c] transition-colors mb-3"
             />
             {error && <p className="mb-3 text-[12px] text-red-500">{error}</p>}
             <div className="flex gap-2.5">
               <button
                 onClick={() => setView("menu")}
-                className="flex-1 rounded-2xl bg-[#f4f3ee] py-3.5 text-[14px] font-semibold text-[#4a4036] active:scale-[0.98] transition-all"
+                className="flex-1 rounded-2xl bg-[#f4f3ee] dark:bg-[#2a2724] py-3.5 text-[14px] font-semibold text-[#4a4036] dark:text-[#e8ddd4] active:scale-[0.98] transition-all"
               >
                 Cancel
               </button>

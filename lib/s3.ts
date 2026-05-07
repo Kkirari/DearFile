@@ -1,4 +1,4 @@
-import { S3Client } from "@aws-sdk/client-s3";
+import { S3Client, CopyObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 
 export const s3 = new S3Client({
   region: process.env.AWS_REGION!,
@@ -13,6 +13,33 @@ export const s3 = new S3Client({
 });
 
 export const BUCKET = process.env.AWS_BUCKET_NAME!;
+
+/**
+ * Rename an S3 object by copying to a new key then deleting the old one.
+ * Preserves the folder prefix (e.g. "uploads/" or "folders/{id}/").
+ * Returns the new key.
+ */
+export async function renameS3Object(oldKey: string, newFilename: string): Promise<string> {
+  const slash = oldKey.lastIndexOf("/");
+  const prefix = slash >= 0 ? oldKey.slice(0, slash + 1) : "";
+  const newKey = prefix + newFilename;
+
+  // Skip if name is unchanged
+  if (oldKey === newKey) return newKey;
+
+  await s3.send(new CopyObjectCommand({
+    Bucket:     BUCKET,
+    CopySource: `${BUCKET}/${oldKey}`,
+    Key:        newKey,
+  }));
+
+  await s3.send(new DeleteObjectCommand({
+    Bucket: BUCKET,
+    Key:    oldKey,
+  }));
+
+  return newKey;
+}
 
 /** Infer MIME type from filename extension (used when listing S3 objects) */
 export function mimeFromFilename(filename: string): string {

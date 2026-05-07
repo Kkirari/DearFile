@@ -2,6 +2,8 @@ import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { Sarabun } from "next/font/google";
 import { LiffProvider } from "@/providers/liff-provider";
+import { LanguageProvider } from "@/providers/language-provider";
+import { ThemeProvider } from "@/providers/theme-provider";
 import "./globals.css";
 
 const sarabun = Sarabun({
@@ -38,7 +40,11 @@ export default function RootLayout({
           src="https://static.line-scdn.net/liff/edge/versions/2.22.3/sdk.js"
           strategy="beforeInteractive"
         />
-        <LiffProvider>{children}</LiffProvider>
+        <ThemeProvider>
+          <LanguageProvider>
+            <LiffProvider>{children}</LiffProvider>
+          </LanguageProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

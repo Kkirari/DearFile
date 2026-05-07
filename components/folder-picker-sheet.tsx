@@ -26,7 +26,6 @@ export function FolderPickerSheet({
   const [createOpen, setCreateOpen]   = useState(false);
   const [localFolders, setLocalFolders] = useState<FolderItem[]>(folders);
 
-  // Keep in sync if parent refreshes
   if (localFolders !== folders && !createOpen) {
     setLocalFolders(folders);
   }
@@ -43,7 +42,6 @@ export function FolderPickerSheet({
 
   async function handleFolderCreated() {
     setCreateOpen(false);
-    // Fetch fresh folder list so the new folder appears immediately
     try {
       const res  = await fetch("/api/folders");
       const data = await res.json() as { folders?: FolderItem[] };
@@ -71,15 +69,15 @@ export function FolderPickerSheet({
         onClick={close}
       />
       <div
-        className={`fixed bottom-0 left-0 right-0 z-[70] rounded-t-[28px] bg-white px-5 pt-4 pb-[calc(24px+env(safe-area-inset-bottom,0px))] shadow-2xl ${isClosing ? "sheet-exit" : "sheet-enter"}`}
+        className={`fixed bottom-0 left-0 right-0 z-[70] rounded-t-[28px] bg-white dark:bg-[#252220] px-5 pt-4 pb-[calc(24px+env(safe-area-inset-bottom,0px))] shadow-2xl ${isClosing ? "sheet-exit" : "sheet-enter"}`}
       >
-        <div className="mx-auto mb-4 h-[5px] w-10 rounded-full bg-[#e0d8cc]" />
+        <div className="mx-auto mb-4 h-[5px] w-10 rounded-full bg-[#e0d8cc] dark:bg-[#3a3430]" />
 
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[17px] font-bold text-[#4a4036]">{title}</h3>
+          <h3 className="text-[17px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{title}</h3>
           <button
             onClick={close}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f4f3ee] text-[#b0a396] active:bg-[#e0d8cc]"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f4f3ee] dark:bg-[#2a2724] text-[#b0a396] dark:text-[#6e6460] active:bg-[#e0d8cc] dark:active:bg-[#3a3430]"
           >
             <X size={16} />
           </button>
@@ -99,7 +97,7 @@ export function FolderPickerSheet({
 
           {userFolders.length > 0 && (
             <>
-              <p className="mt-2 mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-[#b0a396]">
+              <p className="mt-2 mb-1 px-1 text-[10px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
                 Yours
               </p>
               {userFolders.map((f) => (
@@ -162,15 +160,15 @@ function PickerRow({
     <button
       onClick={onClick}
       className={`flex items-center gap-3 w-full rounded-2xl px-3 py-3 text-left transition-all active:scale-[0.98] ${
-        selected ? "bg-[#9b869c]/10" : "active:bg-[#f4f3ee]"
+        selected ? "bg-[#9b869c]/10" : "active:bg-[#f4f3ee] dark:active:bg-[#2a2724]"
       }`}
     >
       <div className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl ${iconBg}`}>
         {icon}
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-[14px] font-semibold text-[#4a4036] truncate">{label}</p>
-        <p className="text-[11px] text-[#b0a396]">{sublabel}</p>
+        <p className="text-[14px] font-semibold text-[#4a4036] dark:text-[#e8ddd4] truncate">{label}</p>
+        <p className="text-[11px] text-[#b0a396] dark:text-[#6e6460]">{sublabel}</p>
       </div>
       {selected && <Check size={16} strokeWidth={2.5} className="flex-shrink-0 text-[#9b869c]" />}
     </button>

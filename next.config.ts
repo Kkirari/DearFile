@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // pdf-parse reads test files at import time — keep it out of the bundle
+  serverExternalPackages: ["pdf-parse"],
   turbopack: {
     root: __dirname,
   },

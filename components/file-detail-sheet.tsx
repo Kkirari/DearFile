@@ -13,14 +13,14 @@ import type { FolderItem } from "@/types/folder";
 // ── Type config ───────────────────────────────────────────────────────────────
 
 const TYPE_CONFIG = {
-  image:   { icon: ImageIcon, bg: "bg-blue-50",    color: "text-blue-500"    },
-  video:   { icon: Film,      bg: "bg-violet-50",  color: "text-violet-500"  },
-  audio:   { icon: Music,     bg: "bg-pink-50",    color: "text-pink-500"    },
-  pdf:     { icon: FileText,  bg: "bg-red-50",     color: "text-red-500"     },
-  doc:     { icon: FileText,  bg: "bg-emerald-50", color: "text-emerald-600" },
-  sheet:   { icon: FileText,  bg: "bg-green-50",   color: "text-green-600"   },
-  archive: { icon: Archive,   bg: "bg-amber-50",   color: "text-amber-500"   },
-  file:    { icon: File,      bg: "bg-[#f4f3ee]",  color: "text-[#9b869c]"   },
+  image:   { icon: ImageIcon, bg: "bg-blue-50 dark:bg-blue-950/40",      color: "text-blue-500"    },
+  video:   { icon: Film,      bg: "bg-violet-50 dark:bg-violet-950/40",  color: "text-violet-500"  },
+  audio:   { icon: Music,     bg: "bg-pink-50 dark:bg-pink-950/40",      color: "text-pink-500"    },
+  pdf:     { icon: FileText,  bg: "bg-red-50 dark:bg-red-950/40",        color: "text-red-500"     },
+  doc:     { icon: FileText,  bg: "bg-emerald-50 dark:bg-emerald-950/40",color: "text-emerald-500" },
+  sheet:   { icon: FileText,  bg: "bg-green-50 dark:bg-green-950/40",    color: "text-green-500"   },
+  archive: { icon: Archive,   bg: "bg-amber-50 dark:bg-amber-950/40",    color: "text-amber-500"   },
+  file:    { icon: File,      bg: "bg-[#f4f3ee] dark:bg-[#2a2724]",      color: "text-[#9b869c]"   },
 };
 
 // ── Props ─────────────────────────────────────────────────────────────────────
@@ -132,9 +132,9 @@ export function FileDetailSheet({
         onClick={close}
       />
       <div
-        className={`fixed bottom-0 left-0 right-0 z-[70] rounded-t-[28px] bg-white px-5 pt-4 pb-[calc(32px+env(safe-area-inset-bottom,0px))] shadow-2xl ${isClosing ? "sheet-exit" : "sheet-enter"}`}
+        className={`fixed bottom-0 left-0 right-0 z-[70] rounded-t-[28px] bg-white dark:bg-[#252220] px-5 pt-4 pb-[calc(32px+env(safe-area-inset-bottom,0px))] shadow-2xl ${isClosing ? "sheet-exit" : "sheet-enter"}`}
       >
-        <div className="mx-auto mb-5 h-[5px] w-10 rounded-full bg-[#e0d8cc]" />
+        <div className="mx-auto mb-5 h-[5px] w-10 rounded-full bg-[#e0d8cc] dark:bg-[#3a3430]" />
 
         {/* File info row */}
         <div className="flex items-center gap-4 mb-6">
@@ -146,16 +146,16 @@ export function FileDetailSheet({
             )}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-bold text-[#4a4036] leading-snug break-all line-clamp-2">
+            <p className="text-[15px] font-bold text-[#4a4036] dark:text-[#e8ddd4] leading-snug break-all line-clamp-2">
               {file.name}
             </p>
-            <p className="mt-1 text-[12px] text-[#b0a396]">
+            <p className="mt-1 text-[12px] text-[#b0a396] dark:text-[#6e6460]">
               {formatBytes(file.size)} · {formatDate(file.createdAt)}
             </p>
           </div>
           <button
             onClick={close}
-            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[#f4f3ee] text-[#b0a396] transition-colors active:bg-[#e0d8cc]"
+            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-[#f4f3ee] dark:bg-[#2a2724] text-[#b0a396] dark:text-[#6e6460] transition-colors active:bg-[#e0d8cc] dark:active:bg-[#3a3430]"
           >
             <X size={16} />
           </button>
@@ -175,22 +175,22 @@ export function FileDetailSheet({
           <ActionRow
             icon={<FolderInput size={19} />}
             label={moving ? "Moving…" : "Move to Folder"}
-            bg="bg-[#f4f3ee]"
-            textColor="text-[#4a4036]"
+            bg="bg-[#f4f3ee] dark:bg-[#2a2724]"
+            textColor="text-[#4a4036] dark:text-[#e8ddd4]"
             onClick={() => setMovePickerOpen(true)}
             disabled={moving}
           />
           <ActionRow
             icon={<Download size={19} />}
             label="Download"
-            bg="bg-[#f4f3ee]"
-            textColor="text-[#4a4036]"
+            bg="bg-[#f4f3ee] dark:bg-[#2a2724]"
+            textColor="text-[#4a4036] dark:text-[#e8ddd4]"
             onClick={handleDownload}
           />
           <ActionRow
             icon={<Trash2 size={19} />}
             label={confirmDelete ? "Tap again to confirm delete" : deleting ? "Deleting…" : "Delete"}
-            bg={confirmDelete ? "bg-red-500" : "bg-red-50"}
+            bg={confirmDelete ? "bg-red-500" : "bg-red-50 dark:bg-red-950/40"}
             textColor={confirmDelete ? "text-white" : "text-red-500"}
             onClick={handleDelete}
             disabled={deleting}

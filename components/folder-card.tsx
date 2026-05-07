@@ -31,8 +31,8 @@ export function FolderCard({ folder, index = 0, onClick, onMore }: FolderCardPro
       onKeyDown={(e) => e.key === "Enter" && onClick?.()}
       className={`card-enter w-full text-left rounded-2xl p-4 transition-all active:scale-95 cursor-pointer ${
         isAi
-          ? "border border-[#9b869c]/20 bg-[#9b869c]/5 shadow-[0_1px_3px_rgba(74,64,54,0.05)]"
-          : "border border-[#e0d8cc] bg-white shadow-[0_1px_3px_rgba(74,64,54,0.07)]"
+          ? "border border-[#9b869c]/20 dark:border-[#9b869c]/30 bg-[#9b869c]/5 dark:bg-[#9b869c]/10 shadow-[0_1px_3px_rgba(74,64,54,0.05)]"
+          : "border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.07)]"
       }`}
       style={{ animationDelay: `${index * 40}ms` }}
     >
@@ -51,14 +51,14 @@ export function FolderCard({ folder, index = 0, onClick, onMore }: FolderCardPro
         {onMore && (
           <button
             onClick={(e) => { e.stopPropagation(); onMore(e); }}
-            className="flex h-7 w-7 items-center justify-center rounded-full text-[#b0a396] active:bg-[#e0d8cc] transition-colors"
+            className="flex h-7 w-7 items-center justify-center rounded-full text-[#b0a396] dark:text-[#6e6460] active:bg-[#e0d8cc] dark:active:bg-[#3a3430] transition-colors"
           >
             <MoreHorizontal size={15} />
           </button>
         )}
       </div>
-      <p className="text-[14px] font-bold leading-tight text-[#4a4036]">{folder.name}</p>
-      <p className="mt-1 text-[11px] text-[#b0a396]">{timeAgo(folder.updatedAt)}</p>
+      <p className="text-[14px] font-bold leading-tight text-[#4a4036] dark:text-[#e8ddd4]">{folder.name}</p>
+      <p className="mt-1 text-[11px] text-[#b0a396] dark:text-[#6e6460]">{timeAgo(folder.updatedAt)}</p>
     </div>
   );
 }
