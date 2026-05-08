@@ -1,7 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { X, Pencil, Trash2, FolderOpen } from "lucide-react";
+import { X, Pencil, Trash2, FolderOpen, Pin, Sparkles, PinOff } from "lucide-react";
+import { FolderCustomizeSheet } from "@/components/folder-customize-sheet";
+import { isPinned as isPinnedPref, togglePin } from "@/lib/folder-prefs";
+import { useLanguage } from "@/providers/language-provider";
 import type { FolderItem } from "@/types/folder";
 
 interface FolderActionsSheetProps {
@@ -10,13 +13,15 @@ interface FolderActionsSheetProps {
   onOpen: () => void;
   onRenamed: () => void;
   onDeleted: () => void;
+  onPrefsChanged?: () => void;
 }
 
 type View = "menu" | "rename";
 
 export function FolderActionsSheet({
-  folder, onClose, onOpen, onRenamed, onDeleted,
+  folder, onClose, onOpen, onRenamed, onDeleted, onPrefsChanged,
 }: FolderActionsSheetProps) {
+  const { tr } = useLanguage();
   const [isClosing, setIsClosing]         = useState(false);
   const [view, setView]                   = useState<View>("menu");
   const [name, setName]                   = useState(folder.name);
@@ -24,11 +29,23 @@ export function FolderActionsSheet({
   const [deleting, setDeleting]           = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError]                 = useState<string | null>(null);
+  const [pinned, setPinned]               = useState(false);
+  const [customizeOpen, setCustomizeOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (view === "rename") setTimeout(() => inputRef.current?.focus(), 80);
   }, [view]);
+
+  useEffect(() => {
+    setPinned(isPinnedPref(folder.id));
+  }, [folder.id]);
+
+  function handleTogglePin() {
+    const next = togglePin(folder.id);
+    setPinned(next);
+    onPrefsChanged?.();
+  }
 
   function close() {
     setIsClosing(true);
@@ -114,21 +131,51 @@ export function FolderActionsSheet({
               onClick={() => { close(); setTimeout(onOpen, 120); }}
             />
             <ActionRow
-              icon={<Pencil size={19} />}
-              label="Rename"
-              bg="bg-[#f4f3ee] dark:bg-[#2a2724]"
-              textColor="text-[#4a4036] dark:text-[#e8ddd4]"
-              onClick={() => setView("rename")}
+              icon={pinned ? <PinOff size={19} /> : <Pin size={19} />}
+              label={pinned ? tr.foldersUnpin : tr.foldersPin}
+              bg="bg-[#9b869c]/10 dark:bg-[#9b869c]/15"
+              textColor="text-[#9b869c]"
+              onClick={handleTogglePin}
             />
-            <ActionRow
-              icon={<Trash2 size={19} />}
-              label={confirmDelete ? "Tap again to confirm delete" : deleting ? "Deleting…" : "Delete Folder"}
-              bg={confirmDelete ? "bg-red-500" : "bg-red-50 dark:bg-red-950/40"}
-              textColor={confirmDelete ? "text-white" : "text-red-500"}
-              onClick={handleDelete}
-              disabled={deleting}
-            />
+            {folder.owner !== "ai" && (
+              <ActionRow
+                icon={<Sparkles size={19} />}
+                label={tr.foldersCustomize}
+                bg="bg-[#f4f3ee] dark:bg-[#2a2724]"
+                textColor="text-[#4a4036] dark:text-[#e8ddd4]"
+                onClick={() => setCustomizeOpen(true)}
+              />
+            )}
+            {folder.owner !== "ai" && (
+              <ActionRow
+                icon={<Pencil size={19} />}
+                label="Rename"
+                bg="bg-[#f4f3ee] dark:bg-[#2a2724]"
+                textColor="text-[#4a4036] dark:text-[#e8ddd4]"
+                onClick={() => setView("rename")}
+              />
+            )}
+            {folder.owner !== "ai" && (
+              <ActionRow
+                icon={<Trash2 size={19} />}
+                label={confirmDelete ? "Tap again to confirm delete" : deleting ? "Deleting…" : "Delete Folder"}
+                bg={confirmDelete ? "bg-red-500" : "bg-red-50 dark:bg-red-950/40"}
+                textColor={confirmDelete ? "text-white" : "text-red-500"}
+                onClick={handleDelete}
+                disabled={deleting}
+              />
+            )}
           </div>
+        )}
+
+        {/* Customize sheet (color + emoji) */}
+        {customizeOpen && (
+          <FolderCustomizeSheet
+            folderId={folder.id}
+            folderName={folder.name}
+            onClose={() => setCustomizeOpen(false)}
+            onSaved={onPrefsChanged}
+          />
         )}
 
         {/* ── RENAME VIEW ── */}

@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import {
-  X, Download, Trash2, Eye, FolderInput,
+  X, Download, Trash2, Eye, FolderInput, Share2,
   FileText, Film, Music, Archive, Image as ImageIcon, File,
 } from "lucide-react";
 import { FolderPickerSheet } from "@/components/folder-picker-sheet";
+import { ShareSheet } from "@/components/share-sheet";
 import { formatBytes, formatDate, getFileIcon } from "@/lib/utils";
 import type { FileItem } from "@/types/file";
 import type { FolderItem } from "@/types/folder";
@@ -46,6 +47,7 @@ export function FileDetailSheet({
   const [moving, setMoving]               = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [movePickerOpen, setMovePickerOpen] = useState(false);
+  const [shareOpen, setShareOpen]           = useState(false);
 
   const type = getFileIcon(file.mimeType) as keyof typeof TYPE_CONFIG;
   const cfg  = TYPE_CONFIG[type] ?? TYPE_CONFIG.file;
@@ -173,6 +175,13 @@ export function FileDetailSheet({
             />
           )}
           <ActionRow
+            icon={<Share2 size={19} />}
+            label="Share"
+            bg="bg-[#06C755]"
+            textColor="text-white"
+            onClick={() => setShareOpen(true)}
+          />
+          <ActionRow
             icon={<FolderInput size={19} />}
             label={moving ? "Moving…" : "Move to Folder"}
             bg="bg-[#f4f3ee] dark:bg-[#2a2724]"
@@ -197,6 +206,14 @@ export function FileDetailSheet({
           />
         </div>
       </div>
+
+      {/* Share sheet (overlay on top of file detail) */}
+      {shareOpen && (
+        <ShareSheet
+          files={[file]}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
     </>
   );
 }

@@ -1,9 +1,22 @@
-import { Folder, Sparkles, MoreHorizontal } from "lucide-react";
+"use client";
+
+import { useEffect, useState } from "react";
+import { Folder, Sparkles, MoreHorizontal, Pin } from "lucide-react";
+import {
+  isPinned as isPinnedPref,
+  getFolderColor,
+  getFolderEmoji,
+  getColorHex,
+} from "@/lib/folder-prefs";
 import type { FolderItem } from "@/types/folder";
+import type { FolderPreview } from "@/hooks/use-folder-previews";
 
 interface FolderCardProps {
   folder: FolderItem;
   index?: number;
+  preview?: FolderPreview;
+  /** Bump this number to force re-read of localStorage prefs after customize. */
+  prefsVersion?: number;
   onClick?: () => void;
   onMore?: (e: React.MouseEvent) => void;
 }
@@ -20,8 +33,26 @@ function timeAgo(iso: string): string {
   return `${days}d ago`;
 }
 
-export function FolderCard({ folder, index = 0, onClick, onMore }: FolderCardProps) {
+export function FolderCard({ folder, index = 0, preview, prefsVersion = 0, onClick, onMore }: FolderCardProps) {
   const isAi = folder.owner === "ai";
+  const fileCount = preview?.total ?? folder.count ?? 0;
+
+  // Reactive prefs (re-read when prefsVersion changes)
+  const [pinned, setPinned]    = useState(false);
+  const [colorId, setColorId]  = useState<string>("default");
+  const [emoji, setEmoji]      = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    setPinned(isPinnedPref(folder.id));
+    if (!isAi) {
+      setColorId(getFolderColor(folder.id));
+      setEmoji(getFolderEmoji(folder.id));
+    }
+  }, [folder.id, isAi, prefsVersion]);
+
+  const colorHex = getColorHex(colorId);
+  const accent   = isAi ? "#9b869c" : colorHex;
 
   return (
     <div
@@ -29,23 +60,35 @@ export function FolderCard({ folder, index = 0, onClick, onMore }: FolderCardPro
       tabIndex={0}
       onClick={onClick}
       onKeyDown={(e) => e.key === "Enter" && onClick?.()}
-      className={`card-enter w-full text-left rounded-2xl p-4 transition-all active:scale-95 cursor-pointer ${
+      className={`card-enter relative w-full text-left rounded-2xl p-4 transition-all active:scale-95 cursor-pointer ${
         isAi
           ? "border border-[#9b869c]/20 dark:border-[#9b869c]/30 bg-[#9b869c]/5 dark:bg-[#9b869c]/10 shadow-[0_1px_3px_rgba(74,64,54,0.05)]"
           : "border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.07)]"
       }`}
       style={{ animationDelay: `${index * 40}ms` }}
     >
+      {/* ── PIN BADGE ── */}
+      {pinned && (
+        <div
+          className="absolute top-2 right-2 flex h-5 w-5 items-center justify-center rounded-full bg-[#9b869c]/15"
+          aria-label="Pinned"
+        >
+          <Pin size={9} className="text-[#9b869c]" strokeWidth={2.5} fill="currentColor" />
+        </div>
+      )}
+
+      {/* ── ICON + MORE BUTTON ── */}
       <div className="flex items-start justify-between mb-3">
         <div
-          className={`flex h-10 w-10 items-center justify-center rounded-xl ${
-            isAi ? "bg-[#9b869c]/15" : "bg-[#9b869c]/10"
-          }`}
+          className="flex h-10 w-10 items-center justify-center rounded-xl text-[20px]"
+          style={{ background: `${accent}1a` }}
         >
-          {isAi ? (
-            <Sparkles size={18} className="text-[#9b869c]" />
+          {emoji ? (
+            <span className="leading-none">{emoji}</span>
+          ) : isAi ? (
+            <Sparkles size={18} style={{ color: accent }} />
           ) : (
-            <Folder size={21} className="text-[#9b869c]" />
+            <Folder size={21} style={{ color: accent }} />
           )}
         </div>
         {onMore && (
@@ -57,8 +100,14 @@ export function FolderCard({ folder, index = 0, onClick, onMore }: FolderCardPro
           </button>
         )}
       </div>
-      <p className="text-[14px] font-bold leading-tight text-[#4a4036] dark:text-[#e8ddd4]">{folder.name}</p>
-      <p className="mt-1 text-[11px] text-[#b0a396] dark:text-[#6e6460]">{timeAgo(folder.updatedAt)}</p>
+
+      {/* ── NAME + META ── */}
+      <p className="text-[14px] font-bold leading-tight text-[#4a4036] dark:text-[#e8ddd4] line-clamp-2">
+        {folder.name}
+      </p>
+      <p className="mt-1 text-[11px] text-[#b0a396] dark:text-[#6e6460]">
+        {fileCount} {fileCount === 1 ? "file" : "files"} · {timeAgo(folder.updatedAt)}
+      </p>
     </div>
   );
 }

@@ -1,13 +1,20 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, Sparkles, FolderOpen, Inbox } from "lucide-react";
+import { useState, useMemo, useEffect } from "react";
+import {
+  Plus, Sparkles, FolderOpen, Inbox, Search, X,
+  ArrowDownWideNarrow, Check, Pin, History,
+} from "lucide-react";
 import { FolderCard } from "@/components/folder-card";
 import { CreateFolderSheet } from "@/components/create-folder-sheet";
 import { FolderActionsSheet } from "@/components/folder-actions-sheet";
 import { FolderViewer } from "@/components/screens/folder-viewer";
 import { useLanguage } from "@/providers/language-provider";
+import { useFolderPreviews } from "@/hooks/use-folder-previews";
+import { getPinned, getRecent, trackVisit } from "@/lib/folder-prefs";
 import type { FolderItem } from "@/types/folder";
+
+type SortMode = "recent" | "name" | "most" | "oldest";
 
 interface FoldersTabProps {
   folders: FolderItem[];
@@ -17,13 +24,103 @@ interface FoldersTabProps {
 }
 
 export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: FoldersTabProps) {
-  const [createOpen, setCreateOpen]   = useState(false);
-  const [viewing, setViewing]         = useState<FolderItem | "inbox" | null>(null);
-  const [activeFolder, setActiveFolder] = useState<FolderItem | null>(null);
   const { tr } = useLanguage();
 
-  const userFolders = folders.filter((f) => f.owner === "user");
-  const aiFolders   = folders.filter((f) => f.owner === "ai");
+  const [createOpen, setCreateOpen]       = useState(false);
+  const [viewing, setViewing]             = useState<FolderItem | "inbox" | null>(null);
+  const [activeFolder, setActiveFolder]   = useState<FolderItem | null>(null);
+
+  // New: search, sort, prefs
+  const [search, setSearch]   = useState("");
+  const [sort, setSort]       = useState<SortMode>("recent");
+  const [sortOpen, setSortOpen] = useState(false);
+  const [pinnedIds, setPinnedIds]   = useState<string[]>([]);
+  const [recentIds, setRecentIds]   = useState<string[]>([]);
+  const [prefsTick, setPrefsTick]   = useState(0); // forces re-read of prefs
+
+  // Folder cover previews (batched)
+  const { previews } = useFolderPreviews(folders.length);
+
+  // Refresh pinned/recent from localStorage when viewing changes (after a visit)
+  useEffect(() => {
+    setPinnedIds(getPinned());
+    setRecentIds(getRecent());
+  }, [viewing, prefsTick]);
+
+  // ── Filter & sort logic ─────────────────────────────────────────────
+  const SORT_OPTIONS = useMemo<{ id: SortMode; label: string }[]>(() => [
+    { id: "recent", label: tr.foldersSortRecent },
+    { id: "name",   label: tr.foldersSortName   },
+    { id: "most",   label: tr.foldersSortMost   },
+    { id: "oldest", label: tr.foldersSortOldest },
+  ], [tr]);
+
+  function applySort(list: FolderItem[]): FolderItem[] {
+    const copy = [...list];
+    switch (sort) {
+      case "name":
+        return copy.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+      case "most":
+        return copy.sort((a, b) => {
+          const ac = previews[a.id]?.total ?? a.count ?? 0;
+          const bc = previews[b.id]?.total ?? b.count ?? 0;
+          return bc - ac;
+        });
+      case "oldest":
+        return copy.sort((a, b) =>
+          new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime());
+      case "recent":
+      default:
+        return copy.sort((a, b) =>
+          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    }
+  }
+
+  function applySearch(list: FolderItem[]): FolderItem[] {
+    const q = search.trim().toLowerCase();
+    if (!q) return list;
+    return list.filter((f) => f.name.toLowerCase().includes(q));
+  }
+
+  // Pinned folders (across both user + ai)
+  const pinnedFolders = useMemo(() => {
+    if (search.trim()) return []; // hide pinned section while searching
+    return pinnedIds
+      .map((id) => folders.find((f) => f.id === id))
+      .filter((f): f is FolderItem => !!f);
+  }, [folders, pinnedIds, search]);
+
+  // Recent visited (excluding pinned, excluding ones not in folders, max 4)
+  const recentVisited = useMemo(() => {
+    if (search.trim()) return [];
+    const pinSet = new Set(pinnedIds);
+    return recentIds
+      .filter((id) => !pinSet.has(id))
+      .map((id) => folders.find((f) => f.id === id))
+      .filter((f): f is FolderItem => !!f)
+      .slice(0, 4);
+  }, [folders, recentIds, pinnedIds, search]);
+
+  // Main user/ai sections (exclude pinned to avoid duplication)
+  const pinSet = useMemo(() => new Set(pinnedIds), [pinnedIds]);
+
+  const userFolders = useMemo(() => {
+    const list = folders.filter((f) => f.owner === "user" && !pinSet.has(f.id));
+    return applySort(applySearch(list));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folders, sort, search, previews, pinSet]);
+
+  const aiFolders = useMemo(() => {
+    const list = folders.filter((f) => f.owner === "ai" && !pinSet.has(f.id));
+    return applySort(applySearch(list));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [folders, sort, search, previews, pinSet]);
+
+  // ── Actions ─────────────────────────────────────────────────────────
+  function openFolder(f: FolderItem | "inbox") {
+    if (f !== "inbox") trackVisit(f.id);
+    setViewing(f);
+  }
 
   if (viewing !== null) {
     return (
@@ -36,11 +133,14 @@ export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: Folde
     );
   }
 
+  const hasSearchResults = userFolders.length + aiFolders.length > 0;
+  const noMatchesAtAll   = !!search.trim() && !hasSearchResults;
+
   return (
     <div className="overflow-y-auto pb-[76px]">
 
       {/* ── HEADER ── */}
-      <div className="px-5 pt-14 pb-5">
+      <div className="px-5 pt-14 pb-3">
         <div className="flex items-center justify-between">
           <h2 className="text-[24px] font-bold leading-none tracking-tight text-[#4a4036] dark:text-[#e8ddd4]">
             {tr.myFolders}
@@ -53,53 +153,172 @@ export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: Folde
             {tr.createFolder}
           </button>
         </div>
+
+        {/* Search + Sort row */}
+        <div className="relative mt-4 flex items-center gap-2">
+          <div className="flex flex-1 items-center gap-2 rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-[9px] shadow-[0_1px_2px_rgba(74,64,54,0.05)] focus-within:shadow-[0_0_0_2px_rgba(155,134,156,0.25)] transition-shadow">
+            <Search size={14} className="flex-shrink-0 text-[#9b869c]" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder={tr.foldersSearch}
+              className="flex-1 bg-transparent text-[13px] text-[#4a4036] dark:text-[#e8ddd4] placeholder:text-[#b0a396] dark:placeholder:text-[#6e6460] outline-none"
+            />
+            <button
+              onClick={() => setSearch("")}
+              className={`flex-shrink-0 transition-all ${
+                search ? "opacity-100 scale-100" : "opacity-0 scale-75 pointer-events-none"
+              }`}
+              aria-label="Clear"
+            >
+              <X size={13} className="text-[#b0a396]" />
+            </button>
+          </div>
+
+          <button
+            onClick={() => setSortOpen((v) => !v)}
+            aria-label={tr.foldersSortBy}
+            className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] text-[#9b869c] active:scale-95 transition-transform shadow-[0_1px_2px_rgba(74,64,54,0.05)]"
+          >
+            <ArrowDownWideNarrow size={14} />
+            {sort !== "recent" && (
+              <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-[#9b869c]" />
+            )}
+          </button>
+
+          {/* Sort dropdown */}
+          {sortOpen && (
+            <>
+              <div className="fixed inset-0 z-30" onClick={() => setSortOpen(false)} />
+              <div className="absolute right-0 top-full mt-2 z-40 w-44 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-lg overflow-hidden fade-up">
+                <p className="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
+                  {tr.foldersSortBy}
+                </p>
+                {SORT_OPTIONS.map((opt) => {
+                  const isActive = sort === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => { setSort(opt.id); setSortOpen(false); }}
+                      className={`w-full flex items-center justify-between px-4 py-2.5 text-left active:bg-[#f4f3ee] dark:active:bg-[#2a2724] transition-colors ${
+                        isActive ? "text-[#9b869c]" : "text-[#4a4036] dark:text-[#e8ddd4]"
+                      }`}
+                    >
+                      <span className={`text-[13px] ${isActive ? "font-bold" : "font-medium"}`}>
+                        {opt.label}
+                      </span>
+                      {isActive && <Check size={14} strokeWidth={2.5} />}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* ── INBOX ── */}
-      <section className="px-5 mb-6">
-        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
-          Default
-        </p>
-        <button
-          onClick={() => setViewing("inbox")}
-          className="w-full flex items-center gap-4 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] px-4 py-4 shadow-[0_1px_3px_rgba(74,64,54,0.07)] text-left active:scale-[0.98] transition-transform"
-        >
-          <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-[#9b869c]/10">
-            <Inbox size={20} className="text-[#9b869c]" />
-          </div>
-          <div className="flex-1">
-            <p className="text-[14px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.unsortedInbox}</p>
-            <p className="text-[12px] text-[#b0a396] dark:text-[#6e6460] mt-0.5">
-              {loading ? "Loading…" : `${unsortedCount} ${tr.unsortedFiles}`}
+      {/* ── INBOX (only when not searching) ── */}
+      {!search.trim() && (
+        <section className="px-5 mb-6">
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
+            Default
+          </p>
+          <button
+            onClick={() => openFolder("inbox")}
+            className="w-full flex items-center gap-4 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] px-4 py-4 shadow-[0_1px_3px_rgba(74,64,54,0.07)] text-left active:scale-[0.98] transition-transform"
+          >
+            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-[#9b869c]/10">
+              <Inbox size={20} className="text-[#9b869c]" />
+            </div>
+            <div className="flex-1">
+              <p className="text-[14px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.unsortedInbox}</p>
+              <p className="text-[12px] text-[#b0a396] dark:text-[#6e6460] mt-0.5">
+                {loading ? "Loading…" : `${unsortedCount} ${tr.unsortedFiles}`}
+              </p>
+            </div>
+            <span className="text-[18px] text-[#b0a396] dark:text-[#6e6460] leading-none">›</span>
+          </button>
+        </section>
+      )}
+
+      {/* ── PINNED ── */}
+      {pinnedFolders.length > 0 && (
+        <section className="px-5 mb-6">
+          <div className="mb-3 flex items-center gap-1.5">
+            <Pin size={10} className="text-[#9b869c]" strokeWidth={2.5} fill="currentColor" />
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9b869c]">
+              {tr.foldersPinned}
             </p>
           </div>
-          <span className="text-[18px] text-[#b0a396] dark:text-[#6e6460] leading-none">›</span>
-        </button>
-      </section>
-
-      {/* ── USER FOLDERS ── */}
-      <section className="px-5">
-        <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
-          {tr.yours}
-        </p>
-        {loading ? (
-          <FolderGrid>{Array.from({ length: 2 }).map((_, i) => <FolderSkeleton key={i} />)}</FolderGrid>
-        ) : userFolders.length === 0 ? (
-          <EmptyFolders onNew={() => setCreateOpen(true)} label={tr.noFoldersYet} createLabel={tr.createFirst} />
-        ) : (
           <FolderGrid>
-            {userFolders.map((folder, i) => (
+            {pinnedFolders.map((folder, i) => (
               <FolderCard
                 key={folder.id}
                 folder={folder}
                 index={i}
-                onClick={() => setViewing(folder)}
+                preview={previews[folder.id]}
+                prefsVersion={prefsTick}
+                onClick={() => openFolder(folder)}
                 onMore={() => setActiveFolder(folder)}
               />
             ))}
           </FolderGrid>
-        )}
-      </section>
+        </section>
+      )}
+
+      {/* ── RECENT VISITED ── */}
+      {recentVisited.length > 0 && (
+        <section className="px-5 mb-6">
+          <div className="mb-3 flex items-center gap-1.5">
+            <History size={10} className="text-[#9b869c]" />
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9b869c]">
+              {tr.foldersRecentVisited}
+            </p>
+          </div>
+          <FolderGrid>
+            {recentVisited.map((folder, i) => (
+              <FolderCard
+                key={folder.id}
+                folder={folder}
+                index={i}
+                preview={previews[folder.id]}
+                prefsVersion={prefsTick}
+                onClick={() => openFolder(folder)}
+                onMore={() => setActiveFolder(folder)}
+              />
+            ))}
+          </FolderGrid>
+        </section>
+      )}
+
+      {/* ── USER FOLDERS ── */}
+      {(userFolders.length > 0 || (!search.trim() && !loading)) && (
+        <section className="px-5">
+          <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
+            {tr.yours}
+          </p>
+          {loading ? (
+            <FolderGrid>{Array.from({ length: 2 }).map((_, i) => <FolderSkeleton key={i} />)}</FolderGrid>
+          ) : userFolders.length === 0 && !search.trim() ? (
+            <EmptyFolders onNew={() => setCreateOpen(true)} label={tr.noFoldersYet} createLabel={tr.createFirst} />
+          ) : (
+            <FolderGrid>
+              {userFolders.map((folder, i) => (
+                <FolderCard
+                  key={folder.id}
+                  folder={folder}
+                  index={i}
+                  preview={previews[folder.id]}
+                  prefsVersion={prefsTick}
+                  onClick={() => openFolder(folder)}
+                  onMore={() => setActiveFolder(folder)}
+                />
+              ))}
+            </FolderGrid>
+          )}
+        </section>
+      )}
 
       {/* ── AI FOLDERS ── */}
       {(loading || aiFolders.length > 0) && (
@@ -119,13 +338,27 @@ export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: Folde
                   key={folder.id}
                   folder={folder}
                   index={i}
-                  onClick={() => setViewing(folder)}
+                  preview={previews[folder.id]}
+                  prefsVersion={prefsTick}
+                  onClick={() => openFolder(folder)}
                   onMore={() => setActiveFolder(folder)}
                 />
               ))}
             </FolderGrid>
           )}
         </section>
+      )}
+
+      {/* ── NO MATCHES (search) ── */}
+      {noMatchesAtAll && (
+        <div className="flex flex-col items-center pt-12 gap-3 px-8 text-center">
+          <div className="h-14 w-14 rounded-2xl bg-[#e0d8cc]/50 dark:bg-[#3a3430]/50 flex items-center justify-center">
+            <Search size={26} className="text-[#b0a396]" />
+          </div>
+          <p className="text-[14px] font-medium text-[#b0a396] dark:text-[#6e6460]">
+            {tr.foldersNoMatch} <span className="text-[#4a4036] dark:text-[#e8ddd4]">&ldquo;{search}&rdquo;</span>
+          </p>
+        </div>
       )}
 
       <div className="h-6" />
@@ -141,14 +374,17 @@ export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: Folde
         <FolderActionsSheet
           folder={activeFolder}
           onClose={() => setActiveFolder(null)}
-          onOpen={() => { setActiveFolder(null); setViewing(activeFolder); }}
+          onOpen={() => { setActiveFolder(null); openFolder(activeFolder); }}
           onRenamed={() => { setActiveFolder(null); onRefresh(); }}
           onDeleted={() => { setActiveFolder(null); onRefresh(); }}
+          onPrefsChanged={() => setPrefsTick((t) => t + 1)}
         />
       )}
     </div>
   );
 }
+
+// ── Sub-components ─────────────────────────────────────────────────────────────
 
 function FolderGrid({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-2 gap-3">{children}</div>;
@@ -156,10 +392,12 @@ function FolderGrid({ children }: { children: React.ReactNode }) {
 
 function FolderSkeleton() {
   return (
-    <div className="rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] p-4 animate-pulse">
-      <div className="mb-3 h-10 w-10 rounded-xl bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
-      <div className="h-3.5 w-3/4 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
-      <div className="mt-2 h-2.5 w-1/2 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
+    <div className="rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] overflow-hidden animate-pulse">
+      <div className="aspect-[5/3] bg-[#e0d8cc]/40 dark:bg-[#3a3430]/40" />
+      <div className="px-3 py-2.5 space-y-1.5">
+        <div className="h-3 w-3/4 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
+        <div className="h-2.5 w-1/2 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
+      </div>
     </div>
   );
 }

@@ -18,6 +18,8 @@ import { FolderCard } from "@/components/folder-card";
 import { FileDetailSheet } from "@/components/file-detail-sheet";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { FolderViewer } from "@/components/screens/folder-viewer";
+import { useFolderPreviews } from "@/hooks/use-folder-previews";
+import { trackVisit } from "@/lib/folder-prefs";
 import { getFileIcon } from "@/lib/utils";
 import { useLanguage } from "@/providers/language-provider";
 import type { FileItem } from "@/types/file";
@@ -67,6 +69,14 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
 
   const recentFiles  = files.slice(0, RECENT_LIMIT);
   const unsortedCount = files.filter((f) => f.id.startsWith("uploads/")).length;
+
+  // Folder cover previews (batched fetch)
+  const { previews } = useFolderPreviews(folders.length);
+
+  function openFolder(f: FolderItem | "inbox") {
+    if (f !== "inbox") trackVisit(f.id);
+    setViewingFolder(f);
+  }
 
   // Show folder viewer if user clicked on a folder
   if (viewingFolder) {
@@ -142,7 +152,7 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
 
         {/* Inbox / Unsorted — always visible */}
         <button
-          onClick={() => setViewingFolder("inbox")}
+          onClick={() => openFolder("inbox")}
           className="card-enter mb-4 w-full flex items-center gap-3.5 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] px-4 py-3.5 shadow-[0_1px_3px_rgba(74,64,54,0.07)] text-left active:scale-[0.98] transition-transform"
         >
           <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-[#9b869c]/10">
@@ -166,7 +176,13 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
             : previewUserFolders.length === 0
               ? <p className="col-span-2 py-3 text-[13px] text-[#b0a396] dark:text-[#6e6460]">{tr.noFolders}</p>
               : previewUserFolders.map((folder, i) => (
-                <FolderCard key={folder.id} folder={folder} index={i} onClick={() => setViewingFolder(folder)} />
+                <FolderCard
+                  key={folder.id}
+                  folder={folder}
+                  index={i}
+                  preview={previews[folder.id]}
+                  onClick={() => openFolder(folder)}
+                />
               ))
           }
         </div>
@@ -183,7 +199,13 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
               {foldersLoading
                 ? Array.from({ length: 2 }).map((_, i) => <FolderSkeleton key={i} />)
                 : previewAiFolders.map((folder, i) => (
-                  <FolderCard key={folder.id} folder={folder} index={i} onClick={() => setViewingFolder(folder)} />
+                  <FolderCard
+                    key={folder.id}
+                    folder={folder}
+                    index={i}
+                    preview={previews[folder.id]}
+                    onClick={() => openFolder(folder)}
+                  />
                 ))
               }
             </div>
@@ -297,10 +319,12 @@ function RecentSkeleton() {
 
 function FolderSkeleton() {
   return (
-    <div className="rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] p-4 animate-pulse">
-      <div className="mb-3 h-10 w-10 rounded-xl bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
-      <div className="h-3.5 w-3/4 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
-      <div className="mt-2 h-2.5 w-1/2 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
+    <div className="rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] overflow-hidden animate-pulse">
+      <div className="aspect-[5/3] bg-[#e0d8cc]/40 dark:bg-[#3a3430]/40" />
+      <div className="px-3 py-2.5 space-y-1.5">
+        <div className="h-3 w-3/4 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
+        <div className="h-2.5 w-1/2 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
+      </div>
     </div>
   );
 }
