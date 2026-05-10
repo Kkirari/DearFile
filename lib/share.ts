@@ -13,27 +13,14 @@
 import type { FileItem } from "@/types/file";
 
 // ── Types & guards ────────────────────────────────────────────────────────────
+// `window.liff` is declared globally in types/liff.d.ts as the full LIFF
+// SDK type, so we don't redeclare it here.
 
-interface LiffMessage {
-  type: "text" | "image";
-  text?: string;
-  originalContentUrl?: string;
-  previewImageUrl?: string;
-}
-
-interface Liff {
-  isApiAvailable?: (apiName: string) => boolean;
-  shareTargetPicker?: (
-    messages: LiffMessage[],
-    options?: { isMultiple?: boolean }
-  ) => Promise<{ status: string } | undefined>;
-}
-
-declare global {
-  interface Window {
-    liff?: Liff;
-  }
-}
+// Discriminated union matches the SDK's expected message shape so each
+// pushed message is typed precisely (TextMessage or ImageMessage).
+type LiffMessage =
+  | { type: "text"; text: string }
+  | { type: "image"; originalContentUrl: string; previewImageUrl: string };
 
 function isImage(file: FileItem): boolean {
   return file.mimeType.startsWith("image/");

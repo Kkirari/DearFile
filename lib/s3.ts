@@ -14,9 +14,9 @@ export const s3 = new S3Client({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
   },
   // SDK v3 ≥ 3.600 adds CRC32 checksums to presigned URLs by default.
-  // "when_required" disables that so the PUT URL stays clean for browser uploads.
-  requestChecksumCalculation: "when_required",
-  responseChecksumValidation: "when_required",
+  // "WHEN_REQUIRED" disables that so the PUT URL stays clean for browser uploads.
+  requestChecksumCalculation: "WHEN_REQUIRED",
+  responseChecksumValidation: "WHEN_REQUIRED",
 });
 
 export const BUCKET = process.env.AWS_BUCKET_NAME!;
