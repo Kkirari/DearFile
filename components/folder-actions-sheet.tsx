@@ -131,13 +131,15 @@ export function FolderActionsSheet({
               textColor="text-white"
               onClick={() => { close(); setTimeout(onOpen, 120); }}
             />
-            <ActionRow
-              icon={pinned ? <PinOff size={19} /> : <Pin size={19} />}
-              label={pinned ? tr.foldersUnpin : tr.foldersPin}
-              bg="bg-[#9b869c]/10 dark:bg-[#9b869c]/15"
-              textColor="text-[#9b869c]"
-              onClick={handleTogglePin}
-            />
+            {folder.owner !== "ai" && (
+              <ActionRow
+                icon={pinned ? <PinOff size={19} /> : <Pin size={19} />}
+                label={pinned ? tr.foldersUnpin : tr.foldersPin}
+                bg="bg-[#9b869c]/10 dark:bg-[#9b869c]/15"
+                textColor="text-[#9b869c]"
+                onClick={handleTogglePin}
+              />
+            )}
             {folder.owner !== "ai" && (
               <ActionRow
                 icon={<Sparkles size={19} />}

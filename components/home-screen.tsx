@@ -77,7 +77,6 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
           pictureUrl={pictureUrl}
           files={files}
           folders={folders}
-          onDataReset={() => { refreshFiles(); refreshFolders(); }}
         />
       )}
       {activeNav === "search" && (
