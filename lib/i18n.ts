@@ -67,6 +67,9 @@ export const t = {
     light:         "Light",
     storageBackend: "LINE OA Cloud",
     version:       "v1.0.0",
+    logout:        "Log out",
+    logoutConfirm: "Tap again to log out",
+    logoutSubtitle: "Sign out of LINE on this device",
 
     // File types
     images:    "Images",
@@ -205,6 +208,9 @@ export const t = {
     light:         "สว่าง",
     storageBackend: "LINE OA Cloud",
     version:       "v1.0.0",
+    logout:        "ออกจากระบบ",
+    logoutConfirm: "แตะอีกครั้งเพื่อออกจากระบบ",
+    logoutSubtitle: "ออกจาก LINE บนอุปกรณ์นี้",
 
     // File types
     images:    "รูปภาพ",
