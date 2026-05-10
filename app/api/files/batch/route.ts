@@ -18,8 +18,9 @@ import {
   userFolderPrefix,
 } from "@/lib/s3";
 import { isAiFolderId } from "@/lib/ai-folders";
-import { removeEntry, renameEntryKey } from "@/lib/search-index";
+import { bulkRemoveEntries, bulkRenameEntryKeys } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
+import { invalidatePreviews } from "@/lib/previews-cache";
 
 interface BatchRequest {
   action: "delete" | "move";
@@ -60,10 +61,11 @@ export async function POST(req: Request) {
         Delete: { Objects: objects, Quiet: true },
       }));
 
-      await Promise.all(keys.map(async (key) => {
-        try { await removeEntry(userId, key); }
-        catch { /* ignore */ }
-      }));
+      // Drop all index entries in one load→mutate→save instead of N.
+      try { await bulkRemoveEntries(userId, keys); }
+      catch (idxErr) { console.warn("[batch delete] index cleanup failed:", idxErr); }
+
+      invalidatePreviews(userId);
 
       const errCount = res.Errors?.length ?? 0;
       return Response.json({
@@ -97,6 +99,7 @@ export async function POST(req: Request) {
 
       let movedCount = 0;
       const errors: string[] = [];
+      const successfulRenames: { oldKey: string; newKey: string }[] = [];
 
       for (const key of keys) {
         const basename = key.split("/").pop()!;
@@ -112,13 +115,22 @@ export async function POST(req: Request) {
             Key:        newKey,
           }));
           await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
-          try { await renameEntryKey(userId, key, newKey); } catch { /* ignore */ }
+          successfulRenames.push({ oldKey: key, newKey });
           movedCount++;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           errors.push(`${key}: ${msg}`);
         }
       }
+
+      // One bulk index update for all successful copies — replaces N
+      // load→mutate→save cycles with one.
+      if (successfulRenames.length > 0) {
+        try { await bulkRenameEntryKeys(userId, successfulRenames); }
+        catch (idxErr) { console.warn("[batch move] index update failed:", idxErr); }
+      }
+
+      if (successfulRenames.length > 0) invalidatePreviews(userId);
 
       return Response.json({ ok: true, moved: movedCount, errors });
     }

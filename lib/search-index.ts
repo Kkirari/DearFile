@@ -141,6 +141,50 @@ export function removeEntriesByUserFolderId(userId: string, folderId: string): P
   });
 }
 
+/**
+ * Apply many key renames in a single load→mutate→save cycle. Used by
+ * batch move so a 50-file move doesn't read+write the entire index 50
+ * times. Updates filename and user_folder_id from the new path, same as
+ * the single renameEntryKey.
+ */
+export function bulkRenameEntryKeys(
+  userId: string,
+  renames: { oldKey: string; newKey: string }[]
+): Promise<number> {
+  return withIndexLock(userId, async () => {
+    if (renames.length === 0) return 0;
+    const map = new Map(renames.map((r) => [r.oldKey, r.newKey]));
+    const idx = await loadIndex(userId);
+    let changed = 0;
+    for (const e of idx) {
+      const newKey = map.get(e.key);
+      if (!newKey) continue;
+      e.key = newKey;
+      e.filename = newKey.split("/").pop() ?? e.filename;
+      e.user_folder_id = userFolderIdFromKey(newKey);
+      changed++;
+    }
+    if (changed > 0) await saveIndex(userId, idx);
+    return changed;
+  });
+}
+
+/**
+ * Remove many entries by key in a single load→mutate→save cycle. Pair
+ * with batch delete to avoid the N reads + N writes pattern.
+ */
+export function bulkRemoveEntries(userId: string, keys: string[]): Promise<number> {
+  return withIndexLock(userId, async () => {
+    if (keys.length === 0) return 0;
+    const drop = new Set(keys);
+    const idx = await loadIndex(userId);
+    const filtered = idx.filter((e) => !drop.has(e.key));
+    const removed = idx.length - filtered.length;
+    if (removed > 0) await saveIndex(userId, filtered);
+    return removed;
+  });
+}
+
 export async function getAllEntries(userId: string): Promise<IndexEntry[]> {
   return loadIndex(userId);
 }

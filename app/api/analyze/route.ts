@@ -11,6 +11,7 @@ import {
 } from "@/lib/s3";
 import { upsertEntry } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
+import { invalidatePreviews } from "@/lib/previews-cache";
 
 /**
  * Extract user folder id from a per-user key.
@@ -91,6 +92,11 @@ export async function POST(req: Request) {
     } catch (idxErr) {
       console.warn("[analyze] index update failed (non-fatal):", idxErr);
     }
+
+    // The new file is now visible — drop the previews cache so the next
+    // /api/folders/previews call recomputes thumbnails for the affected
+    // (and AI) folders.
+    invalidatePreviews(userId);
 
     return Response.json({
       ...analysis,

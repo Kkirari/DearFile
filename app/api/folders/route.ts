@@ -17,6 +17,7 @@ import type { FolderItem } from "@/types/folder";
 import { AI_FOLDERS } from "@/lib/ai-folders";
 import { countByAiFolder, removeEntriesByUserFolderId } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
+import { invalidatePreviews } from "@/lib/previews-cache";
 
 export async function GET(req: Request) {
   let userId: string;
@@ -106,6 +107,8 @@ export async function POST(req: Request) {
       Body:        JSON.stringify(meta),
       ContentType: "application/json",
     }));
+
+    invalidatePreviews(userId);
 
     return Response.json({
       folder: { id, name: meta.name, count: 0, updatedAt: createdAt, owner } satisfies FolderItem,
@@ -230,6 +233,8 @@ export async function DELETE(req: Request) {
       Bucket: BUCKET,
       Key:    userFolderMetaKey(userId, id),
     }));
+
+    invalidatePreviews(userId);
 
     return Response.json({ ok: true, deletedFiles, removedFromIndex });
   } catch (err) {

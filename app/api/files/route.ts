@@ -13,6 +13,7 @@ import type { FileItem } from "@/types/file";
 import { isAiFolderId } from "@/lib/ai-folders";
 import { entriesByAiFolder, removeEntry } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
+import { invalidatePreviews } from "@/lib/previews-cache";
 
 async function objectsToFiles(
   userId: string,
@@ -137,6 +138,7 @@ export async function DELETE(req: Request) {
     }
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
     try { await removeEntry(userId, key); } catch { /* ignore */ }
+    invalidatePreviews(userId);
     return Response.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
