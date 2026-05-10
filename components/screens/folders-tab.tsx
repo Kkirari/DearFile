@@ -37,14 +37,22 @@ export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: Folde
   const [search, setSearch]   = useState("");
   const [sort, setSort]       = useState<SortMode>("recent");
   const [sortOpen, setSortOpen] = useState(false);
-  const [pinnedIds, setPinnedIds]   = useState<string[]>([]);
-  const [recentIds, setRecentIds]   = useState<string[]>([]);
+  // Lazy-init from localStorage so the first paint already has the right
+  // pin/recent state — avoids a one-frame flash where a pinned folder
+  // briefly shows in "Yours" before the effect re-reads localStorage.
+  const [pinnedIds, setPinnedIds]   = useState<string[]>(() =>
+    typeof window === "undefined" ? [] : getPinned()
+  );
+  const [recentIds, setRecentIds]   = useState<string[]>(() =>
+    typeof window === "undefined" ? [] : getRecent()
+  );
   const [prefsTick, setPrefsTick]   = useState(0); // forces re-read of prefs
 
   // Folder cover previews (batched)
   const { previews } = useFolderPreviews(folders.length);
 
-  // Refresh pinned/recent from localStorage when viewing changes (after a visit)
+  // Re-read prefs when the user closes a folder viewer (recent visit) or
+  // toggles a pref from the actions sheet (prefsTick bumps).
   useEffect(() => {
     setPinnedIds(getPinned());
     setRecentIds(getRecent());
