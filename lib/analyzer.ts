@@ -12,7 +12,7 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import type { Readable } from "stream";
 import { s3, BUCKET } from "./s3";
-import { invokeHaiku, type ContentBlock } from "./bedrock";
+import { invokeHaiku, type ContentBlock } from "./anthropic";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
