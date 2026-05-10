@@ -1,17 +1,35 @@
 import { CopyObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { s3, BUCKET } from "@/lib/s3";
+import { s3, BUCKET, isUserOwnedKey, isSafeFolderId } from "@/lib/s3";
 import { isAiFolderId } from "@/lib/ai-folders";
 import { renameEntryKey } from "@/lib/search-index";
 
 export async function POST(req: Request) {
   try {
     const { key, targetFolderId } = await req.json() as {
-      key: string;
-      targetFolderId: string | null;
+      key?: unknown;
+      targetFolderId?: unknown;
     };
 
+    if (!isUserOwnedKey(key)) {
+      return Response.json(
+        { error: "Invalid key — must be under uploads/ or folders/{id}/" },
+        { status: 400 }
+      );
+    }
+
+    // null = inbox; otherwise must be a safe segment
+    const target: string | null =
+      targetFolderId === null || targetFolderId === undefined
+        ? null
+        : isSafeFolderId(targetFolderId)
+        ? targetFolderId
+        : "__invalid__";
+    if (target === "__invalid__") {
+      return Response.json({ error: "Invalid targetFolderId" }, { status: 400 });
+    }
+
     // AI folders are virtual — files cannot physically be moved into them.
-    if (targetFolderId && isAiFolderId(targetFolderId)) {
+    if (target && isAiFolderId(target)) {
       return Response.json(
         { error: "AI folders are auto-organized and cannot be used as a move destination." },
         { status: 400 }
@@ -19,8 +37,8 @@ export async function POST(req: Request) {
     }
 
     const basename = key.split("/").pop()!;
-    const newKey   = targetFolderId
-      ? `folders/${targetFolderId}/${basename}`
+    const newKey   = target
+      ? `folders/${target}/${basename}`
       : `uploads/${basename}`;
 
     if (key === newKey) return Response.json({ ok: true, newKey });

@@ -1,6 +1,6 @@
 import { ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { s3, BUCKET, mimeFromFilename } from "@/lib/s3";
+import { s3, BUCKET, mimeFromFilename, isUserOwnedKey } from "@/lib/s3";
 import type { FileItem } from "@/types/file";
 import { isAiFolderId } from "@/lib/ai-folders";
 import { entriesByAiFolder, removeEntry } from "@/lib/search-index";
@@ -89,7 +89,13 @@ export async function GET(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const { key } = await req.json() as { key: string };
+    const { key } = await req.json() as { key?: unknown };
+    if (!isUserOwnedKey(key)) {
+      return Response.json(
+        { error: "Invalid key — must be under uploads/ or folders/{id}/" },
+        { status: 400 }
+      );
+    }
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
     // Best-effort cleanup of search index
     try { await removeEntry(key); } catch { /* ignore */ }

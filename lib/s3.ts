@@ -76,6 +76,30 @@ export async function getS3ObjectTags(key: string): Promise<Record<string, strin
   return out;
 }
 
+/**
+ * True only for keys inside the user-data namespace: `uploads/...` or
+ * `folders/{folderId}/...`. Rejects empty keys, path traversal, and system
+ * keys (e.g. `folder-meta/...`, `_search-index.json`). Use this on every
+ * client-supplied key before any S3 mutation.
+ */
+export function isUserOwnedKey(key: unknown): key is string {
+  if (typeof key !== "string" || key.length === 0) return false;
+  if (key.includes("..") || key.includes("//")) return false;
+  if (key.startsWith("uploads/")) return key.length > "uploads/".length;
+  // folders/{id}/... — id must be non-empty and not contain "/"
+  return /^folders\/[^/]+\/.+/.test(key);
+}
+
+/**
+ * True only for folder ids that are safe to use as a path segment
+ * (no `/`, no `..`, no leading dot). Use before constructing keys from
+ * client-supplied folder ids.
+ */
+export function isSafeFolderId(id: unknown): id is string {
+  if (typeof id !== "string" || id.length === 0) return false;
+  return /^[a-zA-Z0-9_-]+$/.test(id);
+}
+
 /** Infer MIME type from filename extension (used when listing S3 objects) */
 export function mimeFromFilename(filename: string): string {
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";

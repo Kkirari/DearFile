@@ -8,7 +8,7 @@ import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
-import { s3, BUCKET } from "@/lib/s3";
+import { s3, BUCKET, isUserOwnedKey, isSafeFolderId } from "@/lib/s3";
 import { isAiFolderId } from "@/lib/ai-folders";
 import { removeEntry, renameEntryKey } from "@/lib/search-index";
 
@@ -26,6 +26,16 @@ export async function POST(req: Request) {
 
     if (!Array.isArray(keys) || keys.length === 0) {
       return Response.json({ error: "Missing keys array" }, { status: 400 });
+    }
+
+    // Reject the whole batch if any key escapes the user-data namespace —
+    // a single bad entry indicates a buggy or malicious caller; partial
+    // success would be confusing.
+    if (!keys.every(isUserOwnedKey)) {
+      return Response.json(
+        { error: "All keys must be under uploads/ or folders/{id}/" },
+        { status: 400 }
+      );
     }
 
     // ── DELETE ─────────────────────────────────────────────────────────
@@ -53,7 +63,16 @@ export async function POST(req: Request) {
 
     // ── MOVE ───────────────────────────────────────────────────────────
     if (action === "move") {
-      if (targetFolderId && isAiFolderId(targetFolderId)) {
+      const target: string | null =
+        targetFolderId === null || targetFolderId === undefined
+          ? null
+          : isSafeFolderId(targetFolderId)
+          ? targetFolderId
+          : "__invalid__";
+      if (target === "__invalid__") {
+        return Response.json({ error: "Invalid targetFolderId" }, { status: 400 });
+      }
+      if (target && isAiFolderId(target)) {
         return Response.json(
           { error: "AI folders are auto-organized and cannot be used as a move destination." },
           { status: 400 }
@@ -66,8 +85,8 @@ export async function POST(req: Request) {
       // Sequential to keep error reporting clear (could parallelize)
       for (const key of keys) {
         const basename = key.split("/").pop()!;
-        const newKey   = targetFolderId
-          ? `folders/${targetFolderId}/${basename}`
+        const newKey   = target
+          ? `folders/${target}/${basename}`
           : `uploads/${basename}`;
         if (key === newKey) { movedCount++; continue; }
 
