@@ -59,8 +59,12 @@ function writeJson(key: string, value: unknown): void {
 
 // ── Pinned folders ────────────────────────────────────────────────────────────
 
+// Pinning is restricted to user-owned folders. AI folders are virtual and
+// auto-organized, so pinning them adds no value. This filter also removes
+// any AI ids that may have been pinned by older builds.
 export function getPinned(): string[] {
-  return readJson<string[]>(PIN_KEY, []).filter((x) => typeof x === "string");
+  return readJson<string[]>(PIN_KEY, [])
+    .filter((x) => typeof x === "string" && !x.startsWith("ai-"));
 }
 
 export function isPinned(id: string): boolean {
@@ -68,6 +72,9 @@ export function isPinned(id: string): boolean {
 }
 
 export function togglePin(id: string): boolean {
+  // Defense in depth — UI hides Pin for AI folders, but if a caller slips
+  // through, refuse silently instead of polluting the pin list.
+  if (id.startsWith("ai-")) return false;
   const list = getPinned();
   const i = list.indexOf(id);
   if (i >= 0) {

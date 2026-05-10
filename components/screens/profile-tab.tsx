@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import Image from "next/image";
 import {
   User,
@@ -17,11 +16,6 @@ import {
   Globe,
   Moon,
   Sun,
-  Trash2,
-  Wrench,
-  Loader2,
-  CheckCircle2,
-  AlertTriangle,
 } from "lucide-react";
 import { formatBytes, getFileIcon } from "@/lib/utils";
 import { useLanguage } from "@/providers/language-provider";
@@ -29,69 +23,19 @@ import { useTheme } from "@/providers/theme-provider";
 import type { Lang } from "@/lib/i18n";
 import type { FileItem } from "@/types/file";
 import type { FolderItem } from "@/types/folder";
-import { apiFetch } from "@/lib/api-client";
 
 interface ProfileTabProps {
   displayName?: string;
   pictureUrl?: string;
   files: FileItem[];
   folders: FolderItem[];
-  onDataReset?: () => void;
 }
-
-type FormatState = "idle" | "confirm" | "running" | "done" | "error";
 
 const STORAGE_LIMIT = 500 * 1024 * 1024; // 500 MB. Lift to env / config when real quotas exist.
 
-// Destructive admin action — only show outside production unless explicitly enabled.
-const SHOW_DEV_TOOLS =
-  process.env.NEXT_PUBLIC_SHOW_DEV_TOOLS === "1" ||
-  process.env.NODE_ENV !== "production";
-
-export function ProfileTab({ displayName, pictureUrl, files, folders, onDataReset }: ProfileTabProps) {
+export function ProfileTab({ displayName, pictureUrl, files, folders }: ProfileTabProps) {
   const { lang, setLang, tr } = useLanguage();
   const { theme, setTheme }   = useTheme();
-
-  const [formatState, setFormatState] = useState<FormatState>("idle");
-  const [formatDeleted, setFormatDeleted] = useState(0);
-
-  async function handleFormat() {
-    if (formatState === "idle") {
-      // First tap — arm the destructive action
-      setFormatState("confirm");
-      setTimeout(() => {
-        setFormatState((s) => (s === "confirm" ? "idle" : s));
-      }, 4000);
-      return;
-    }
-    if (formatState !== "confirm") return;
-
-    setFormatState("running");
-    try {
-      // Format requires the server-side ADMIN_TOKEN. We don't bake it into
-      // the bundle — prompt the operator at click time so the secret stays
-      // out of NEXT_PUBLIC_*.
-      const adminToken = window.prompt("Enter ADMIN_TOKEN to confirm wipe:") ?? "";
-      if (!adminToken) {
-        setFormatState("idle");
-        return;
-      }
-      const res  = await apiFetch("/api/admin/format", {
-        method: "POST",
-        headers: { "x-admin-token": adminToken },
-      });
-      const data = await res.json() as { ok?: boolean; deleted?: number; error?: string };
-      if (!data.ok) throw new Error(data.error ?? "Format failed");
-      setFormatDeleted(data.deleted ?? 0);
-      setFormatState("done");
-      onDataReset?.();
-      setTimeout(() => setFormatState("idle"), 3000);
-    } catch (err) {
-      console.error(err);
-      setFormatState("error");
-      setTimeout(() => setFormatState("idle"), 3000);
-    }
-  }
 
   const totalSize   = files.reduce((sum, f) => sum + (f.size ?? 0), 0);
   const userFolders = folders.filter((f) => f.owner === "user");
@@ -304,81 +248,6 @@ export function ProfileTab({ displayName, pictureUrl, files, folders, onDataRese
           </div>
         </div>
       </section>
-
-      {/* ── DEVELOPER (hidden in production unless NEXT_PUBLIC_SHOW_DEV_TOOLS=1) ── */}
-      {SHOW_DEV_TOOLS && (
-      <section className="px-5 mt-5">
-        <div className="mb-3 flex items-center gap-1.5">
-          <Wrench size={12} className="text-[#9b869c]" />
-          <p className="t-body font-bold text-[#4a4036] dark:text-[#e8ddd4]">Developer</p>
-          <span className="ml-1 rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 t-caption font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
-            Debug
-          </span>
-        </div>
-        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
-          <button
-            onClick={handleFormat}
-            disabled={formatState === "running"}
-            className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors disabled:cursor-not-allowed ${
-              formatState === "confirm"
-                ? "bg-red-500 active:bg-red-600"
-                : formatState === "running"
-                ? "bg-[#f4f3ee] dark:bg-[#2a2724]"
-                : formatState === "done"
-                ? "bg-emerald-50 dark:bg-emerald-950/30"
-                : formatState === "error"
-                ? "bg-red-50 dark:bg-red-950/30"
-                : "active:bg-red-50 dark:active:bg-red-950/30"
-            }`}
-          >
-            <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-colors ${
-              formatState === "confirm"
-                ? "bg-white/20"
-                : formatState === "done"
-                ? "bg-emerald-100 dark:bg-emerald-900/40"
-                : formatState === "error"
-                ? "bg-red-100 dark:bg-red-900/40"
-                : "bg-red-50 dark:bg-red-950/40"
-            }`}>
-              {formatState === "running"
-                ? <Loader2 size={14} className="text-[#9b869c] animate-spin" />
-                : formatState === "done"
-                ? <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400" />
-                : formatState === "error"
-                ? <AlertTriangle size={14} className="text-red-500" />
-                : <Trash2 size={14} className={formatState === "confirm" ? "text-white" : "text-red-500"} />
-              }
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className={`t-body font-bold leading-tight ${
-                formatState === "confirm"
-                  ? "text-white"
-                  : formatState === "done"
-                  ? "text-emerald-700 dark:text-emerald-400"
-                  : formatState === "error"
-                  ? "text-red-600 dark:text-red-400"
-                  : "text-red-500"
-              }`}>
-                {formatState === "running" ? "Wiping bucket…"
-                  : formatState === "done"  ? `Wiped ${formatDeleted} object${formatDeleted === 1 ? "" : "s"}`
-                  : formatState === "error" ? "Format failed, check logs"
-                  : formatState === "confirm" ? "Tap again to confirm"
-                  : "Format All Data"}
-              </p>
-              <p className={`mt-0.5 t-caption leading-tight ${
-                formatState === "confirm"
-                  ? "text-white/85"
-                  : "text-[#b0a396] dark:text-[#6e6460]"
-              }`}>
-                {formatState === "confirm"
-                  ? "Deletes ALL files, folders & search index. Irreversible."
-                  : "Erase every file, folder, and the search index"}
-              </p>
-            </div>
-          </button>
-        </div>
-      </section>
-      )}
 
       {/* ── ABOUT ── */}
       <section className="px-5 mt-5">
