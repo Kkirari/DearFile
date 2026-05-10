@@ -28,7 +28,9 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
   const { files, loading: filesLoading, refresh: refreshFiles } = useFiles("all");
   const { folders, loading: foldersLoading, refresh: refreshFolders } = useFolders();
 
-  const unsortedCount = files.filter((f) => f.id.startsWith("uploads/")).length;
+  // Per-user layout: keys are users/{userId}/uploads/... so match the
+  // segment, not a startsWith.
+  const unsortedCount = files.filter((f) => f.id.includes("/uploads/")).length;
 
   const { tr } = useLanguage();
 

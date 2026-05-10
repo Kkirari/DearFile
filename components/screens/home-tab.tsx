@@ -68,7 +68,9 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
   const hasMoreFolders = userFolders.length > HOME_FOLDER_LIMIT || aiFolders.length > HOME_FOLDER_LIMIT;
 
   const recentFiles  = files.slice(0, RECENT_LIMIT);
-  const unsortedCount = files.filter((f) => f.id.startsWith("uploads/")).length;
+  // Per-user layout: keys are users/{userId}/uploads/... so match the
+  // segment, not a startsWith.
+  const unsortedCount = files.filter((f) => f.id.includes("/uploads/")).length;
 
   // Folder cover previews (batched fetch)
   const { previews } = useFolderPreviews(folders.length);
