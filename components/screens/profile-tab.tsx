@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Image from "next/image";
 import {
   User,
@@ -16,10 +17,12 @@ import {
   Globe,
   Moon,
   Sun,
+  LogOut,
 } from "lucide-react";
 import { formatBytes, getFileIcon } from "@/lib/utils";
 import { useLanguage } from "@/providers/language-provider";
 import { useTheme } from "@/providers/theme-provider";
+import { useLiff } from "@/providers/liff-provider";
 import type { Lang } from "@/lib/i18n";
 import type { FileItem } from "@/types/file";
 import type { FolderItem } from "@/types/folder";
@@ -36,6 +39,22 @@ const STORAGE_LIMIT = 500 * 1024 * 1024; // 500 MB. Lift to env / config when re
 export function ProfileTab({ displayName, pictureUrl, files, folders }: ProfileTabProps) {
   const { lang, setLang, tr } = useLanguage();
   const { theme, setTheme }   = useTheme();
+  const { logout }            = useLiff();
+
+  const [confirmLogout, setConfirmLogout] = useState(false);
+
+  function handleLogout() {
+    if (!confirmLogout) {
+      // Two-tap pattern — first tap arms, second tap fires.
+      setConfirmLogout(true);
+      setTimeout(() => setConfirmLogout(false), 4000);
+      return;
+    }
+    logout();
+    // Hard reload so the LiffProvider re-runs init from a clean slate;
+    // !isLoggedIn will redirect back to the LINE login flow.
+    setTimeout(() => window.location.reload(), 50);
+  }
 
   const totalSize   = files.reduce((sum, f) => sum + (f.size ?? 0), 0);
   const userFolders = folders.filter((f) => f.owner === "user");
@@ -263,6 +282,38 @@ export function ProfileTab({ displayName, pictureUrl, files, folders }: ProfileT
             label="Storage"
             value={tr.storageBackend}
           />
+        </div>
+      </section>
+
+      {/* ── LOGOUT ── */}
+      <section className="px-5 mt-5">
+        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
+          <button
+            onClick={handleLogout}
+            className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors ${
+              confirmLogout
+                ? "bg-red-500 active:bg-red-600"
+                : "active:bg-red-50 dark:active:bg-red-950/30"
+            }`}
+          >
+            <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg transition-colors ${
+              confirmLogout ? "bg-white/20" : "bg-red-50 dark:bg-red-950/40"
+            }`}>
+              <LogOut size={14} className={confirmLogout ? "text-white" : "text-red-500"} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className={`t-body font-bold leading-tight ${
+                confirmLogout ? "text-white" : "text-red-500"
+              }`}>
+                {confirmLogout ? tr.logoutConfirm : tr.logout}
+              </p>
+              <p className={`mt-0.5 t-caption leading-tight ${
+                confirmLogout ? "text-white/85" : "text-[#b0a396] dark:text-[#6e6460]"
+              }`}>
+                {tr.logoutSubtitle}
+              </p>
+            </div>
+          </button>
         </div>
       </section>
 
