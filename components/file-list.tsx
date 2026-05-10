@@ -43,7 +43,7 @@ export function FileList({ files, loading, onDelete }: FileListProps) {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="ค้นหาไฟล์..."
-            className="w-full rounded-xl border border-[#e0d8cc] bg-white py-2.5 pl-9 pr-4 text-sm text-[#4a4036] shadow-[0_1px_2px_rgba(74,64,54,0.06)] placeholder:text-[#b0a396] focus:border-[#9b869c]/50 focus:outline-none focus:ring-2 focus:ring-[#9b869c]/15 transition-shadow"
+            className="w-full rounded-xl border border-[#e0d8cc] bg-[#fbfaf6] py-2.5 pl-9 pr-4 text-sm text-[#4a4036] shadow-[0_1px_2px_rgba(74,64,54,0.06)] placeholder:text-[#b0a396] focus:border-[#9b869c]/50 focus:outline-none focus:ring-2 focus:ring-[#9b869c]/15 transition-shadow"
           />
         </div>
       )}

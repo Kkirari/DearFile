@@ -126,7 +126,7 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
 
         <button
           onClick={() => onNavigate("search")}
-          className="flex w-full items-center gap-2.5 rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-[10px] shadow-[0_1px_3px_rgba(74,64,54,0.06)] text-left active:scale-[0.98] transition-transform"
+          className="flex w-full items-center gap-2.5 rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-[10px] shadow-[0_1px_3px_rgba(74,64,54,0.06)] text-left active:scale-[0.98] transition-transform"
         >
           <Search size={15} className="flex-shrink-0 text-[#9b869c]" />
           <span className="flex-1 text-sm text-[#b0a396] dark:text-[#6e6460] select-none">
@@ -150,21 +150,31 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
           )}
         </div>
 
-        {/* Inbox / Unsorted — always visible */}
+        {/* Inbox / Unsorted — promoted hero card, always visible */}
         <button
           onClick={() => openFolder("inbox")}
-          className="card-enter mb-4 w-full flex items-center gap-3.5 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] px-4 py-3.5 shadow-[0_1px_3px_rgba(74,64,54,0.07)] text-left active:scale-[0.98] transition-transform"
+          className="card-enter relative mb-4 w-full flex items-center gap-4 rounded-2xl border border-[#9b869c]/20 dark:border-[#9b869c]/30 bg-gradient-to-br from-[#9b869c]/[0.09] via-[#fbfaf6] to-[#9b869c]/[0.04] dark:from-[#9b869c]/15 dark:via-[#252220] dark:to-[#9b869c]/[0.08] px-4 py-4 text-left active:scale-[0.98] transition-transform"
         >
-          <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-[#9b869c]/10">
-            <Inbox size={18} className="text-[#9b869c]" />
+          <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-[#9b869c] shadow-[0_4px_12px_rgba(155,134,156,0.28)]">
+            <Inbox size={22} className="text-white" strokeWidth={2.2} />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="text-[14px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.unsortedInbox}</p>
+            <p className="text-[15px] font-bold text-[#4a4036] dark:text-[#e8ddd4] leading-tight">
+              {tr.unsortedInbox}
+            </p>
             <p className="text-[12px] text-[#b0a396] dark:text-[#6e6460] mt-0.5">
-              {filesLoading ? "Loading…" : `${unsortedCount} ${tr.unsortedFiles}`}
+              {filesLoading
+                ? "Loading…"
+                : unsortedCount === 0
+                  ? tr.unsortedFiles
+                  : `${unsortedCount} ${tr.unsortedFiles}`}
             </p>
           </div>
-          <ChevronRight size={14} className="flex-shrink-0 text-[#b0a396] dark:text-[#6e6460]" />
+          {!filesLoading && unsortedCount > 0 && (
+            <span className="rounded-full bg-[#9b869c] text-white text-[12px] font-bold px-2.5 py-1 leading-none min-w-[26px] text-center">
+              {unsortedCount > 99 ? "99+" : unsortedCount}
+            </span>
+          )}
         </button>
 
         <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
@@ -190,8 +200,8 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
         {(foldersLoading || previewAiFolders.length > 0) && (
           <>
             <div className="mt-4 mb-2.5 flex items-center gap-1.5">
-              <Sparkles size={11} className="text-[#9b869c]" />
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9b869c]">
+              <Sparkles size={11} className="text-[#d99c5b]" />
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-[#d99c5b]">
                 {tr.organizedByAi}
               </p>
             </div>
@@ -233,7 +243,7 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
                   <button
                     key={file.id}
                     onClick={() => setSelectedFile(file)}
-                    className="card-enter flex-shrink-0 flex flex-col justify-between w-[120px] h-[140px] rounded-2xl bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] p-3 shadow-[0_1px_3px_rgba(74,64,54,0.07)] text-left active:scale-95 transition-transform"
+                    className="card-enter flex-shrink-0 flex flex-col justify-between w-[120px] h-[140px] rounded-2xl bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] p-3 shadow-[0_1px_3px_rgba(74,64,54,0.07)] text-left active:scale-95 transition-transform"
                     style={{ animationDelay: `${i * 50}ms` }}
                   >
                     {isImage ? (
@@ -306,7 +316,7 @@ function timeAgo(iso: string): string {
 
 function RecentSkeleton() {
   return (
-    <div className="flex-shrink-0 w-[120px] h-[140px] rounded-2xl bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] p-3 animate-pulse">
+    <div className="flex-shrink-0 w-[120px] h-[140px] rounded-2xl bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] p-3 animate-pulse">
       <div className="h-9 w-9 rounded-xl bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
       <div className="mt-auto pt-8 space-y-1.5">
         <div className="h-3 w-4/5 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
@@ -319,7 +329,7 @@ function RecentSkeleton() {
 
 function FolderSkeleton() {
   return (
-    <div className="rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] overflow-hidden animate-pulse">
+    <div className="rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] overflow-hidden animate-pulse">
       <div className="aspect-[5/3] bg-[#e0d8cc]/40 dark:bg-[#3a3430]/40" />
       <div className="px-3 py-2.5 space-y-1.5">
         <div className="h-3 w-3/4 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />

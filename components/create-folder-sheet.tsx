@@ -57,7 +57,7 @@ export function CreateFolderSheet({ onClose, onCreated }: CreateFolderSheetProps
         onClick={close}
       />
       <div
-        className={`fixed bottom-0 left-0 right-0 z-[70] rounded-t-[28px] bg-white dark:bg-[#252220] px-5 pt-4 pb-[calc(32px+env(safe-area-inset-bottom,0px))] shadow-2xl ${isClosing ? "sheet-exit" : "sheet-enter"}`}
+        className={`fixed bottom-0 left-0 right-0 z-[70] rounded-t-[28px] bg-[#fbfaf6] dark:bg-[#252220] px-5 pt-4 pb-[calc(32px+env(safe-area-inset-bottom,0px))] shadow-2xl ${isClosing ? "sheet-exit" : "sheet-enter"}`}
       >
         <div className="mx-auto mb-5 h-[5px] w-10 rounded-full bg-[#e0d8cc] dark:bg-[#3a3430]" />
 

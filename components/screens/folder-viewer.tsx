@@ -257,7 +257,7 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
         <div className="flex items-center gap-3 px-4 pt-12 pb-4 bg-[#f4f3ee] dark:bg-[#1c1a18]">
           <button
             onClick={onBack}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] shadow-sm active:scale-95 transition-transform"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] shadow-sm active:scale-95 transition-transform"
           >
             <ChevronLeft size={18} className="text-[#4a4036] dark:text-[#e8ddd4]" strokeWidth={2.5} />
           </button>
@@ -277,7 +277,7 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
             <button
               onClick={() => enterSelection()}
               aria-label={tr.selectFiles}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] shadow-sm text-[#9b869c] active:scale-95 transition-transform"
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] shadow-sm text-[#9b869c] active:scale-95 transition-transform"
             >
               <CheckSquare size={15} />
             </button>
@@ -285,7 +285,7 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
 
           {/* View mode toggle */}
           {files.length > 0 && (
-            <div className="flex items-center gap-0.5 rounded-full border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] p-0.5 shadow-sm">
+            <div className="flex items-center gap-0.5 rounded-full border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] p-0.5 shadow-sm">
               <button
                 onClick={() => changeViewMode("list")}
                 aria-label="List view"
@@ -352,7 +352,7 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
                   onPointerLeave={handlePressEnd}
                   onPointerCancel={handlePressEnd}
                   onContextMenu={(e) => { e.preventDefault(); if (!selectionMode) enterSelection(file.id); }}
-                  className={`card-enter flex items-center gap-3.5 w-full bg-white dark:bg-[#252220] rounded-2xl border px-4 py-3.5 text-left shadow-[0_1px_3px_rgba(74,64,54,0.06)] active:scale-[0.98] transition-all ${
+                  className={`card-enter flex items-center gap-3.5 w-full bg-[#fbfaf6] dark:bg-[#252220] rounded-2xl border px-4 py-3.5 text-left shadow-[0_1px_3px_rgba(74,64,54,0.06)] active:scale-[0.98] transition-all ${
                     isSelected
                       ? "border-[#9b869c] bg-[#9b869c]/5 dark:bg-[#9b869c]/10"
                       : "border-[#e0d8cc] dark:border-[#3a3430]"
@@ -413,7 +413,7 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
                   onPointerLeave={handlePressEnd}
                   onPointerCancel={handlePressEnd}
                   onContextMenu={(e) => { e.preventDefault(); if (!selectionMode) enterSelection(file.id); }}
-                  className={`card-enter relative aspect-square w-full overflow-hidden rounded-2xl border bg-white dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)] active:scale-[0.97] transition-all ${
+                  className={`card-enter relative aspect-square w-full overflow-hidden rounded-2xl border bg-[#fbfaf6] dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)] active:scale-[0.97] transition-all ${
                     isSelected
                       ? "border-[#9b869c] ring-2 ring-[#9b869c]/40"
                       : "border-[#e0d8cc] dark:border-[#3a3430]"
@@ -473,7 +473,7 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
 
       {/* ── BATCH ACTION BAR (selection mode only — z-60 to cover bottom nav) ── */}
       {selectionMode && (
-        <div className="fixed bottom-0 left-0 right-0 z-[60] bg-white dark:bg-[#252220] border-t border-[#e0d8cc] dark:border-[#3a3430] shadow-[0_-4px_16px_rgba(74,64,54,0.12)] sheet-enter">
+        <div className="fixed bottom-0 left-0 right-0 z-[60] bg-[#fbfaf6] dark:bg-[#252220] border-t border-[#e0d8cc] dark:border-[#3a3430] shadow-[0_-4px_16px_rgba(74,64,54,0.12)] sheet-enter">
           {batchError && (
             <div className="flex items-center gap-2 px-4 py-2 bg-red-50 dark:bg-red-950/40 text-red-600 dark:text-red-400 text-[12px]">
               <AlertTriangle size={12} />
@@ -518,7 +518,7 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
             className="fixed inset-0 z-[80] bg-black/35 backdrop-enter"
             onClick={() => setConfirmDeleteOpen(false)}
           />
-          <div className="fixed bottom-0 left-0 right-0 z-[80] rounded-t-[28px] bg-white dark:bg-[#252220] px-5 pt-4 pb-[calc(28px+env(safe-area-inset-bottom,0px))] shadow-2xl sheet-enter">
+          <div className="fixed bottom-0 left-0 right-0 z-[80] rounded-t-[28px] bg-[#fbfaf6] dark:bg-[#252220] px-5 pt-4 pb-[calc(28px+env(safe-area-inset-bottom,0px))] shadow-2xl sheet-enter">
             <div className="mx-auto mb-4 h-[5px] w-10 rounded-full bg-[#e0d8cc] dark:bg-[#3a3430]" />
             <div className="flex flex-col items-center text-center mb-5">
               <div className="h-12 w-12 rounded-2xl bg-red-50 dark:bg-red-950/40 flex items-center justify-center mb-3">
@@ -636,7 +636,7 @@ function FileGridSkeleton() {
 
 function FileSkeleton() {
   return (
-    <div className="flex items-center gap-3.5 bg-white dark:bg-[#252220] rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-3.5 animate-pulse">
+    <div className="flex items-center gap-3.5 bg-[#fbfaf6] dark:bg-[#252220] rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-3.5 animate-pulse">
       <div className="h-10 w-10 flex-shrink-0 rounded-xl bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
       <div className="flex-1 space-y-2">
         <div className="h-3.5 w-3/4 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />

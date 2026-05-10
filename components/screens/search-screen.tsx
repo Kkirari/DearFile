@@ -256,7 +256,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
 
             {/* Input pill */}
             <div className="relative flex-1">
-              <div className="flex items-center gap-2.5 rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-[10px] shadow-[0_1px_3px_rgba(74,64,54,0.06)] transition-shadow focus-within:shadow-[0_0_0_2px_rgba(155,134,156,0.3)]">
+              <div className="flex items-center gap-2.5 rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-[10px] shadow-[0_1px_3px_rgba(74,64,54,0.06)] transition-shadow focus-within:shadow-[0_0_0_2px_rgba(155,134,156,0.3)]">
                 <Search
                   size={15}
                   className={`flex-shrink-0 transition-colors duration-200 ${query ? "text-[#9b869c]" : "text-[#c0b4a8]"}`}
@@ -293,7 +293,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
 
               {/* Autocomplete dropdown */}
               {showSuggest && suggestions.length > 0 && query.trim() && (
-                <div className="absolute left-0 right-0 top-full mt-2 z-30 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-lg overflow-hidden fade-up">
+                <div className="absolute left-0 right-0 top-full mt-2 z-30 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] shadow-lg overflow-hidden fade-up">
                   {suggestions.map((s, i) => {
                     const idx = s.toLowerCase().indexOf(query.toLowerCase());
                     return (
@@ -327,7 +327,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
               <button
                 onClick={() => setSortOpen((v) => !v)}
                 aria-label={tr.searchSortBy}
-                className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] text-[#9b869c] active:scale-95 transition-transform"
+                className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] text-[#9b869c] active:scale-95 transition-transform"
               >
                 <ArrowDownWideNarrow size={15} />
                 {sort !== "relevance" && (
@@ -352,7 +352,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
                     className={`flex-shrink-0 flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold border transition-all ${
                       isActive
                         ? "bg-[#9b869c] text-white border-transparent shadow-sm"
-                        : "bg-white dark:bg-[#252220] text-[#4a4036] dark:text-[#e8ddd4] border-[#e0d8cc] dark:border-[#3a3430]"
+                        : "bg-[#fbfaf6] dark:bg-[#252220] text-[#4a4036] dark:text-[#e8ddd4] border-[#e0d8cc] dark:border-[#3a3430]"
                     }`}
                   >
                     <span>{chip.emoji}</span>
@@ -374,7 +374,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
           {sortOpen && (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setSortOpen(false)} />
-              <div className="absolute right-4 top-[110px] z-40 w-44 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-lg overflow-hidden fade-up">
+              <div className="absolute right-4 top-[110px] z-40 w-44 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] shadow-lg overflow-hidden fade-up">
                 <p className="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
                   {tr.searchSortBy}
                 </p>
@@ -430,7 +430,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
                     {recents.map((r, i) => (
                       <div
                         key={`${r}-${i}`}
-                        className="fade-up group flex items-center gap-1.5 rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] pl-3 pr-1 py-1 text-[13px] font-medium text-[#4a4036] dark:text-[#e8ddd4] shadow-[0_1px_2px_rgba(74,64,54,0.05)]"
+                        className="fade-up group flex items-center gap-1.5 rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] pl-3 pr-1 py-1 text-[13px] font-medium text-[#4a4036] dark:text-[#e8ddd4] shadow-[0_1px_2px_rgba(74,64,54,0.05)]"
                         style={{ animationDelay: `${i * 30}ms` }}
                       >
                         <button
@@ -469,7 +469,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
                         key={chip.id}
                         onClick={() => setFilter(chip.id)}
                         disabled={count === 0}
-                        className="fade-up flex items-center gap-2.5 rounded-2xl bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-3 py-2.5 text-left active:scale-95 disabled:opacity-40 disabled:active:scale-100 transition-transform shadow-[0_1px_2px_rgba(74,64,54,0.05)]"
+                        className="fade-up flex items-center gap-2.5 rounded-2xl bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-3 py-2.5 text-left active:scale-95 disabled:opacity-40 disabled:active:scale-100 transition-transform shadow-[0_1px_2px_rgba(74,64,54,0.05)]"
                         style={{ animationDelay: `${60 + i * 40}ms` }}
                       >
                         <span className="text-[20px]">{chip.emoji}</span>
@@ -649,7 +649,7 @@ function SearchResultRow({
   return (
     <button
       onClick={onClick}
-      className="card-enter w-full flex items-center gap-3 rounded-2xl bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-3 shadow-[0_1px_3px_rgba(74,64,54,0.06)] text-left active:scale-[0.98] transition-transform"
+      className="card-enter w-full flex items-center gap-3 rounded-2xl bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-3 shadow-[0_1px_3px_rgba(74,64,54,0.06)] text-left active:scale-[0.98] transition-transform"
       style={{ animationDelay: `${index * 35}ms` }}
     >
       {isImage ? (
@@ -699,7 +699,7 @@ function SearchResultRow({
 function SearchRowSkeleton({ delay = 0 }: { delay?: number }) {
   return (
     <div
-      className="fade-up flex items-center gap-3 rounded-2xl bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-3 animate-pulse"
+      className="fade-up flex items-center gap-3 rounded-2xl bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-3 animate-pulse"
       style={{ animationDelay: `${delay}ms` }}
     >
       <div className="h-10 w-10 rounded-xl bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60 flex-shrink-0" />

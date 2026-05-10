@@ -2,7 +2,7 @@ export function EmptyState() {
   return (
     <div className="page-fade flex flex-col items-center justify-center px-8 py-20 text-center">
       <div className="relative mb-6">
-        <div className="flex h-24 w-24 items-center justify-center rounded-[28px] border border-[#e0d8cc] bg-white shadow-sm">
+        <div className="flex h-24 w-24 items-center justify-center rounded-[28px] border border-[#e0d8cc] bg-[#fbfaf6] shadow-sm">
           <span className="text-4xl">📂</span>
         </div>
         <div className="absolute -bottom-1.5 -right-1.5 flex h-8 w-8 items-center justify-center rounded-full bg-[#06C755] shadow-md">
@@ -15,7 +15,7 @@ export function EmptyState() {
         ส่งไฟล์มาใน LINE OA ของเรา แล้วไฟล์จะปรากฏที่นี่โดยอัตโนมัติ
       </p>
 
-      <div className="mt-5 flex items-center gap-2 rounded-xl border border-[#e0d8cc] bg-white px-5 py-3 shadow-sm">
+      <div className="mt-5 flex items-center gap-2 rounded-xl border border-[#e0d8cc] bg-[#fbfaf6] px-5 py-3 shadow-sm">
         <span className="text-sm">📎</span>
         <p className="text-xs text-[#b0a396]">
           รูปภาพ, วิดีโอ, เอกสาร, PDF และอื่นๆ

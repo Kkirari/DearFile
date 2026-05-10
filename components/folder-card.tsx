@@ -7,6 +7,7 @@ import {
   getFolderColor,
   getFolderEmoji,
   getColorHex,
+  AI_ACCENT,
 } from "@/lib/folder-prefs";
 import type { FolderItem } from "@/types/folder";
 import type { FolderPreview } from "@/hooks/use-folder-previews";
@@ -52,7 +53,7 @@ export function FolderCard({ folder, index = 0, preview, prefsVersion = 0, onCli
   }, [folder.id, isAi, prefsVersion]);
 
   const colorHex = getColorHex(colorId);
-  const accent   = isAi ? "#9b869c" : colorHex;
+  const accent   = isAi ? AI_ACCENT : colorHex;
 
   return (
     <div
@@ -62,8 +63,8 @@ export function FolderCard({ folder, index = 0, preview, prefsVersion = 0, onCli
       onKeyDown={(e) => e.key === "Enter" && onClick?.()}
       className={`card-enter relative w-full text-left rounded-2xl p-4 transition-all active:scale-95 cursor-pointer ${
         isAi
-          ? "border border-[#9b869c]/20 dark:border-[#9b869c]/30 bg-[#9b869c]/5 dark:bg-[#9b869c]/10 shadow-[0_1px_3px_rgba(74,64,54,0.05)]"
-          : "border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.07)]"
+          ? "border border-[#d99c5b]/25 dark:border-[#d99c5b]/35 bg-[#d99c5b]/[0.06] dark:bg-[#d99c5b]/10 shadow-[0_1px_3px_rgba(74,64,54,0.05)]"
+          : "border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.07)]"
       }`}
       style={{ animationDelay: `${index * 40}ms` }}
     >

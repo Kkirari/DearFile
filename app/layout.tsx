@@ -8,7 +8,9 @@ import "./globals.css";
 
 const sarabun = Sarabun({
   subsets: ["thai", "latin"],
-  weight: ["300", "400", "500", "600", "700", "800"],
+  // Three-weight system: 500 medium for body, 700 bold for emphasis,
+  // 800 extrabold reserved for display surfaces only.
+  weight: ["500", "700", "800"],
   variable: "--font-sarabun",
   display: "swap",
 });

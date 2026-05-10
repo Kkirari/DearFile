@@ -40,6 +40,13 @@ interface ProfileTabProps {
 
 type FormatState = "idle" | "confirm" | "running" | "done" | "error";
 
+const STORAGE_LIMIT = 500 * 1024 * 1024; // 500 MB. Lift to env / config when real quotas exist.
+
+// Destructive admin action — only show outside production unless explicitly enabled.
+const SHOW_DEV_TOOLS =
+  process.env.NEXT_PUBLIC_SHOW_DEV_TOOLS === "1" ||
+  process.env.NODE_ENV !== "production";
+
 export function ProfileTab({ displayName, pictureUrl, files, folders, onDataReset }: ProfileTabProps) {
   const { lang, setLang, tr } = useLanguage();
   const { theme, setTheme }   = useTheme();
@@ -100,22 +107,30 @@ export function ProfileTab({ displayName, pictureUrl, files, folders, onDataRese
     <div className="overflow-y-auto pb-[76px]">
 
       {/* ── HERO ── */}
-      <div className="relative bg-[#f4f3ee] dark:bg-[#1c1a18] px-5 pt-14 pb-8">
-        <div className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-[#9b869c]/10 to-transparent pointer-events-none" />
+      <div className="relative bg-[#f4f3ee] dark:bg-[#1c1a18] px-5 pt-14 pb-7 overflow-hidden">
+        {/* A committed warm peachy-mauve glow instead of the previous timid 10% gradient */}
+        <div
+          aria-hidden
+          className="absolute inset-x-0 -top-16 h-64 pointer-events-none"
+          style={{
+            background:
+              "radial-gradient(ellipse 70% 60% at 50% 30%, rgba(155,134,156,0.22) 0%, rgba(217,156,91,0.10) 45%, transparent 75%)",
+          }}
+        />
         <div className="flex flex-col items-center text-center relative">
           <div className="relative mb-4">
-            <div className="h-24 w-24 overflow-hidden rounded-full border-[3px] border-white dark:border-[#3a3430] shadow-[0_6px_24px_rgba(155,134,156,0.3)]">
+            <div className="h-28 w-28 overflow-hidden rounded-full border-[3px] border-white dark:border-[#3a3430] shadow-[0_8px_28px_rgba(155,134,156,0.32)]">
               {pictureUrl ? (
                 <Image
                   src={pictureUrl}
                   alt={displayName ?? "profile"}
-                  width={96}
-                  height={96}
+                  width={112}
+                  height={112}
                   className="h-full w-full object-cover"
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-[#9b869c]/15">
-                  <User size={36} className="text-[#9b869c]" />
+                  <User size={42} className="text-[#9b869c]" />
                 </div>
               )}
             </div>
@@ -123,105 +138,122 @@ export function ProfileTab({ displayName, pictureUrl, files, folders, onDataRese
               <span className="text-[7px] font-extrabold text-white leading-none">LINE</span>
             </div>
           </div>
-          <h2 className="text-[22px] font-extrabold tracking-tight text-[#4a4036] dark:text-[#e8ddd4]">
+          <h2 className="t-title text-[#4a4036] dark:text-[#e8ddd4]">
             {displayName ?? "User"}
           </h2>
-          <p className="mt-1 text-[12px] text-[#b0a396] dark:text-[#6e6460]">{tr.lineAccount}</p>
+          <p className="mt-1 t-caption text-[#b0a396] dark:text-[#6e6460]">{tr.lineAccount}</p>
+
+          {/* Inline summary replaces the 3-card hero-metric template */}
+          <p className="mt-4 t-body tnum text-[#4a4036] dark:text-[#e8ddd4]">
+            <span className="font-bold">{files.length}</span>
+            <span className="text-[#b0a396] dark:text-[#6e6460]"> {tr.files} · </span>
+            <span className="font-bold">{folders.length}</span>
+            <span className="text-[#b0a396] dark:text-[#6e6460]"> {tr.folders} · </span>
+            <span className="font-bold">{formatBytes(totalSize)}</span>
+            <span className="text-[#b0a396] dark:text-[#6e6460]"> {tr.used}</span>
+          </p>
         </div>
       </div>
 
-      {/* ── STATS ROW ── */}
-      <section className="px-5 mb-2">
-        <div className="grid grid-cols-3 gap-3">
-          <StatCard value={files.length} label={tr.files} />
-          <StatCard value={folders.length} label={tr.folders} />
-          <StatCard value={formatBytes(totalSize)} label={tr.used} raw />
-        </div>
-      </section>
-
       {/* ── STORAGE BAR ── */}
-      <section className="px-5 mt-8">
-        <div className="rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] p-4 shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
+      <section className="px-5 mt-6">
+        <div className="rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] p-4 shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#9b869c]/10">
                 <HardDrive size={14} className="text-[#9b869c]" />
               </div>
-              <span className="text-[13px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.storage}</span>
+              <span className="t-body font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.storage}</span>
             </div>
-            <span className="text-[12px] text-[#b0a396] dark:text-[#6e6460]">{formatBytes(totalSize)} {tr.usedSuffix}</span>
+            <span className="t-caption tnum text-[#b0a396] dark:text-[#6e6460]">
+              {formatBytes(totalSize)} / {formatBytes(STORAGE_LIMIT)}
+            </span>
           </div>
           <div className="h-2 w-full overflow-hidden rounded-full bg-[#f4f3ee] dark:bg-[#2a2724]">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-[#9b869c] to-[#c4adc7] transition-all"
-              style={{ width: `${Math.min((totalSize / (500 * 1024 * 1024)) * 100, 100)}%` }}
+              className="h-full rounded-full transition-all"
+              style={{
+                width: `${Math.min((totalSize / STORAGE_LIMIT) * 100, 100)}%`,
+                background:
+                  totalSize / STORAGE_LIMIT >= 0.9
+                    ? "#d97a8a"  // rose — at limit
+                    : totalSize / STORAGE_LIMIT >= 0.7
+                    ? "#d99c5b"  // amber — getting close
+                    : "#9b869c", // mauve — comfortable
+              }}
             />
           </div>
-          <p className="mt-2 text-right text-[11px] text-[#b0a396] dark:text-[#6e6460]">{tr.storageOf}</p>
+          <p className="mt-2 text-right t-caption tnum text-[#b0a396] dark:text-[#6e6460]">
+            {Math.round((totalSize / STORAGE_LIMIT) * 100)}% {tr.usedSuffix}
+          </p>
         </div>
       </section>
 
       {/* ── FOLDERS ── */}
       <section className="px-5 mt-5">
-        <p className="mb-3 text-[13px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.myFolders}</p>
-        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)] divide-y divide-[#e0d8cc]/60 dark:divide-[#3a3430]/60">
+        <p className="mb-3 t-body font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.myFolders}</p>
+        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)] divide-y divide-[#e0d8cc]/60 dark:divide-[#3a3430]/60">
           <InfoRow
             icon={<Folder size={15} className="text-[#9b869c]" />}
             label={tr.myFoldersLabel}
             value={`${userFolders.length} ${tr.folders}`}
           />
           <InfoRow
-            icon={<Sparkles size={15} className="text-[#9b869c]" />}
+            icon={<Sparkles size={15} className="text-[#d99c5b]" />}
             label={tr.aiFolders}
             value={`${aiFolders.length} ${tr.folders}`}
           />
         </div>
       </section>
 
-      {/* ── FILE TYPES ── */}
-      <section className="px-5 mt-5">
-        <p className="mb-3 text-[13px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.fileTypes}</p>
-        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)] divide-y divide-[#e0d8cc]/60 dark:divide-[#3a3430]/60">
-          {FILE_TYPES.map(({ key, label, icon: Icon, bg, color }) => {
-            const count = typeCounts[key] ?? 0;
-            return (
-              <div key={key} className="flex items-center gap-3 px-4 py-3">
-                <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${bg}`}>
-                  <Icon size={14} className={color} />
-                </div>
-                <span className="flex-1 text-[13px] text-[#4a4036] dark:text-[#e8ddd4]">{label}</span>
-                <div className="flex items-center gap-2">
-                  <div className="h-1.5 w-20 overflow-hidden rounded-full bg-[#f4f3ee] dark:bg-[#2a2724]">
-                    <div
-                      className="h-full rounded-full bg-[#9b869c]/50 transition-all"
-                      style={{ width: `${(count / maxCount) * 100}%` }}
-                    />
+      {/* ── FILE TYPES ── (hide types with zero count to remove visual noise) */}
+      {Object.values(typeCounts).some((c) => c > 0) && (
+        <section className="px-5 mt-5">
+          <p className="mb-3 t-body font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.fileTypes}</p>
+          <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)] divide-y divide-[#e0d8cc]/60 dark:divide-[#3a3430]/60">
+            {FILE_TYPES.filter(({ key }) => (typeCounts[key] ?? 0) > 0).map(
+              ({ key, label, icon: Icon, bg, color }) => {
+                const count = typeCounts[key] ?? 0;
+                return (
+                  <div key={key} className="flex items-center gap-3 px-4 py-3">
+                    <div className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg ${bg}`}>
+                      <Icon size={14} className={color} />
+                    </div>
+                    <span className="flex-1 t-body text-[#4a4036] dark:text-[#e8ddd4]">{label}</span>
+                    <div className="flex items-center gap-2">
+                      <div className="h-1.5 w-20 overflow-hidden rounded-full bg-[#f4f3ee] dark:bg-[#2a2724]">
+                        <div
+                          className="h-full rounded-full bg-[#9b869c]/55 transition-all"
+                          style={{ width: `${(count / maxCount) * 100}%` }}
+                        />
+                      </div>
+                      <span className="w-6 text-right t-caption tnum font-bold text-[#9b869c]">{count}</span>
+                    </div>
                   </div>
-                  <span className="w-5 text-right text-[12px] font-semibold text-[#9b869c]">{count}</span>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
+                );
+              },
+            )}
+          </div>
+        </section>
+      )}
 
       {/* ── SETTINGS ── */}
       <section className="px-5 mt-5">
-        <p className="mb-3 text-[13px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.settings}</p>
-        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)] divide-y divide-[#e0d8cc]/60 dark:divide-[#3a3430]/60">
+        <p className="mb-3 t-body font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.settings}</p>
+        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)] divide-y divide-[#e0d8cc]/60 dark:divide-[#3a3430]/60">
 
           {/* Language toggle */}
           <div className="flex items-center gap-3 px-4 py-3.5">
             <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">
               <Globe size={15} className="text-[#9b869c]" />
             </div>
-            <span className="flex-1 text-[13px] text-[#4a4036] dark:text-[#e8ddd4]">{tr.language}</span>
+            <span className="flex-1 t-body text-[#4a4036] dark:text-[#e8ddd4]">{tr.language}</span>
             <div className="flex items-center gap-1 rounded-full border border-[#e0d8cc] dark:border-[#3a3430] bg-[#f4f3ee] dark:bg-[#2a2724] p-0.5">
               {(["en", "th"] as Lang[]).map((l) => (
                 <button
                   key={l}
                   onClick={() => setLang(l)}
-                  className={`rounded-full px-3 py-1 text-[12px] font-semibold transition-all ${
+                  className={`rounded-full px-3 py-1 t-caption font-bold transition-all ${
                     lang === l
                       ? "bg-[#9b869c] text-white shadow-sm"
                       : "text-[#b0a396] dark:text-[#6e6460]"
@@ -241,13 +273,13 @@ export function ProfileTab({ displayName, pictureUrl, files, folders, onDataRese
                 : <Sun size={15} className="text-[#9b869c]" />
               }
             </div>
-            <span className="flex-1 text-[13px] text-[#4a4036] dark:text-[#e8ddd4]">{tr.appearance}</span>
+            <span className="flex-1 t-body text-[#4a4036] dark:text-[#e8ddd4]">{tr.appearance}</span>
             <div className="flex items-center gap-1 rounded-full border border-[#e0d8cc] dark:border-[#3a3430] bg-[#f4f3ee] dark:bg-[#2a2724] p-0.5">
               {(["light", "dark"] as const).map((t) => (
                 <button
                   key={t}
                   onClick={() => setTheme(t)}
-                  className={`rounded-full px-3 py-1 text-[12px] font-semibold transition-all ${
+                  className={`rounded-full px-3 py-1 t-caption font-bold transition-all ${
                     theme === t
                       ? "bg-[#9b869c] text-white shadow-sm"
                       : "text-[#b0a396] dark:text-[#6e6460]"
@@ -261,16 +293,17 @@ export function ProfileTab({ displayName, pictureUrl, files, folders, onDataRese
         </div>
       </section>
 
-      {/* ── DEVELOPER ── */}
+      {/* ── DEVELOPER (hidden in production unless NEXT_PUBLIC_SHOW_DEV_TOOLS=1) ── */}
+      {SHOW_DEV_TOOLS && (
       <section className="px-5 mt-5">
         <div className="mb-3 flex items-center gap-1.5">
           <Wrench size={12} className="text-[#9b869c]" />
-          <p className="text-[13px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">Developer</p>
-          <span className="ml-1 rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+          <p className="t-body font-bold text-[#4a4036] dark:text-[#e8ddd4]">Developer</p>
+          <span className="ml-1 rounded-full bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 t-caption font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
             Debug
           </span>
         </div>
-        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
+        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
           <button
             onClick={handleFormat}
             disabled={formatState === "running"}
@@ -305,7 +338,7 @@ export function ProfileTab({ displayName, pictureUrl, files, folders, onDataRese
               }
             </div>
             <div className="flex-1 min-w-0">
-              <p className={`text-[13px] font-semibold leading-tight ${
+              <p className={`t-body font-bold leading-tight ${
                 formatState === "confirm"
                   ? "text-white"
                   : formatState === "done"
@@ -316,11 +349,11 @@ export function ProfileTab({ displayName, pictureUrl, files, folders, onDataRese
               }`}>
                 {formatState === "running" ? "Wiping bucket…"
                   : formatState === "done"  ? `Wiped ${formatDeleted} object${formatDeleted === 1 ? "" : "s"}`
-                  : formatState === "error" ? "Format failed — check logs"
+                  : formatState === "error" ? "Format failed, check logs"
                   : formatState === "confirm" ? "Tap again to confirm"
                   : "Format All Data"}
               </p>
-              <p className={`mt-0.5 text-[11px] leading-tight ${
+              <p className={`mt-0.5 t-caption leading-tight ${
                 formatState === "confirm"
                   ? "text-white/85"
                   : "text-[#b0a396] dark:text-[#6e6460]"
@@ -333,11 +366,12 @@ export function ProfileTab({ displayName, pictureUrl, files, folders, onDataRese
           </button>
         </div>
       </section>
+      )}
 
       {/* ── ABOUT ── */}
       <section className="px-5 mt-5">
-        <p className="mb-3 text-[13px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.about}</p>
-        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)] divide-y divide-[#e0d8cc]/60 dark:divide-[#3a3430]/60">
+        <p className="mb-3 t-body font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.about}</p>
+        <div className="overflow-hidden rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] shadow-[0_1px_3px_rgba(74,64,54,0.06)] divide-y divide-[#e0d8cc]/60 dark:divide-[#3a3430]/60">
           <InfoRow
             icon={<Info size={15} className="text-[#9b869c]" />}
             label="DearFile"
@@ -358,23 +392,12 @@ export function ProfileTab({ displayName, pictureUrl, files, folders, onDataRese
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
-function StatCard({ value, label, raw }: { value: number | string; label: string; raw?: boolean }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] px-3 py-4 shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
-      <span className={`font-extrabold text-[#4a4036] dark:text-[#e8ddd4] leading-none ${raw ? "text-[15px]" : "text-[22px]"}`}>
-        {value}
-      </span>
-      <span className="mt-1.5 text-[11px] text-[#b0a396] dark:text-[#6e6460]">{label}</span>
-    </div>
-  );
-}
-
 function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3.5">
       <div className="flex h-6 w-6 flex-shrink-0 items-center justify-center">{icon}</div>
-      <span className="flex-1 text-[13px] text-[#4a4036] dark:text-[#e8ddd4]">{label}</span>
-      <span className="text-[12px] font-medium text-[#b0a396] dark:text-[#6e6460]">{value}</span>
+      <span className="flex-1 t-body text-[#4a4036] dark:text-[#e8ddd4]">{label}</span>
+      <span className="t-caption tnum font-bold text-[#b0a396] dark:text-[#6e6460]">{value}</span>
     </div>
   );
 }

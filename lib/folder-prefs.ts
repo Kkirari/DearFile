@@ -26,6 +26,11 @@ export const FOLDER_COLORS = [
   { id: "graphite",label: "Graphite", hex: "#6e6460" },
 ];
 
+// Reserved accents — keep `LAVENDER` (mauve) for interaction state only;
+// `AI_ACCENT` (warm amber) marks AI-organized surfaces as a distinct lane.
+export const LAVENDER   = "#9b869c";
+export const AI_ACCENT  = "#d99c5b";
+
 export const FOLDER_EMOJIS = [
   "📁", "📂", "🗂️", "📦", "🎁", "💼",
   "📚", "📝", "📷", "🎨", "🎵", "🎬",

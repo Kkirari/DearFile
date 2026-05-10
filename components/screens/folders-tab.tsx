@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import {
-  Plus, Sparkles, FolderOpen, Inbox, Search, X,
+  Plus, Sparkles, FolderOpen, Folder, Inbox, Search, X,
   ArrowDownWideNarrow, Check, Pin, History,
 } from "lucide-react";
 import { FolderCard } from "@/components/folder-card";
@@ -11,7 +11,10 @@ import { FolderActionsSheet } from "@/components/folder-actions-sheet";
 import { FolderViewer } from "@/components/screens/folder-viewer";
 import { useLanguage } from "@/providers/language-provider";
 import { useFolderPreviews } from "@/hooks/use-folder-previews";
-import { getPinned, getRecent, trackVisit } from "@/lib/folder-prefs";
+import {
+  getPinned, getRecent, trackVisit,
+  getFolderColor, getFolderEmoji, getColorHex,
+} from "@/lib/folder-prefs";
 import type { FolderItem } from "@/types/folder";
 
 type SortMode = "recent" | "name" | "most" | "oldest";
@@ -156,7 +159,7 @@ export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: Folde
 
         {/* Search + Sort row */}
         <div className="relative mt-4 flex items-center gap-2">
-          <div className="flex flex-1 items-center gap-2 rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-[9px] shadow-[0_1px_2px_rgba(74,64,54,0.05)] focus-within:shadow-[0_0_0_2px_rgba(155,134,156,0.25)] transition-shadow">
+          <div className="flex flex-1 items-center gap-2 rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] px-4 py-[9px] shadow-[0_1px_2px_rgba(74,64,54,0.05)] focus-within:shadow-[0_0_0_2px_rgba(155,134,156,0.25)] transition-shadow">
             <Search size={14} className="flex-shrink-0 text-[#9b869c]" />
             <input
               type="text"
@@ -179,7 +182,7 @@ export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: Folde
           <button
             onClick={() => setSortOpen((v) => !v)}
             aria-label={tr.foldersSortBy}
-            className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-white dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] text-[#9b869c] active:scale-95 transition-transform shadow-[0_1px_2px_rgba(74,64,54,0.05)]"
+            className="relative flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] text-[#9b869c] active:scale-95 transition-transform shadow-[0_1px_2px_rgba(74,64,54,0.05)]"
           >
             <ArrowDownWideNarrow size={14} />
             {sort !== "recent" && (
@@ -191,7 +194,7 @@ export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: Folde
           {sortOpen && (
             <>
               <div className="fixed inset-0 z-30" onClick={() => setSortOpen(false)} />
-              <div className="absolute right-0 top-full mt-2 z-40 w-44 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] shadow-lg overflow-hidden fade-up">
+              <div className="absolute right-0 top-full mt-2 z-40 w-44 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] shadow-lg overflow-hidden fade-up">
                 <p className="px-4 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
                   {tr.foldersSortBy}
                 </p>
@@ -218,52 +221,58 @@ export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: Folde
         </div>
       </div>
 
-      {/* ── INBOX (only when not searching) ── */}
+      {/* ── INBOX (promoted, only when not searching) ── */}
       {!search.trim() && (
         <section className="px-5 mb-6">
-          <p className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
-            Default
-          </p>
           <button
             onClick={() => openFolder("inbox")}
-            className="w-full flex items-center gap-4 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] px-4 py-4 shadow-[0_1px_3px_rgba(74,64,54,0.07)] text-left active:scale-[0.98] transition-transform"
+            className="relative w-full flex items-center gap-4 rounded-2xl border border-[#9b869c]/20 dark:border-[#9b869c]/30 bg-gradient-to-br from-[#9b869c]/[0.09] via-[#fbfaf6] to-[#9b869c]/[0.04] dark:from-[#9b869c]/15 dark:via-[#252220] dark:to-[#9b869c]/[0.08] px-4 py-4 text-left active:scale-[0.98] transition-transform"
           >
-            <div className="flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-xl bg-[#9b869c]/10">
-              <Inbox size={20} className="text-[#9b869c]" />
+            <div className="flex h-12 w-12 flex-shrink-0 items-center justify-center rounded-2xl bg-[#9b869c] shadow-[0_4px_12px_rgba(155,134,156,0.28)]">
+              <Inbox size={22} className="text-white" strokeWidth={2.2} />
             </div>
-            <div className="flex-1">
-              <p className="text-[14px] font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.unsortedInbox}</p>
+            <div className="flex-1 min-w-0">
+              <p className="text-[15px] font-bold text-[#4a4036] dark:text-[#e8ddd4] leading-tight">
+                {tr.unsortedInbox}
+              </p>
               <p className="text-[12px] text-[#b0a396] dark:text-[#6e6460] mt-0.5">
-                {loading ? "Loading…" : `${unsortedCount} ${tr.unsortedFiles}`}
+                {loading
+                  ? "Loading…"
+                  : unsortedCount === 0
+                    ? tr.unsortedFiles
+                    : `${unsortedCount} ${tr.unsortedFiles}`}
               </p>
             </div>
-            <span className="text-[18px] text-[#b0a396] dark:text-[#6e6460] leading-none">›</span>
+            {!loading && unsortedCount > 0 && (
+              <span className="rounded-full bg-[#9b869c] text-white text-[12px] font-bold px-2.5 py-1 leading-none min-w-[26px] text-center">
+                {unsortedCount > 99 ? "99+" : unsortedCount}
+              </span>
+            )}
           </button>
         </section>
       )}
 
-      {/* ── PINNED ── */}
+      {/* ── PINNED (compact horizontal chip row) ── */}
       {pinnedFolders.length > 0 && (
-        <section className="px-5 mb-6">
-          <div className="mb-3 flex items-center gap-1.5">
+        <section className="mb-6">
+          <div className="px-5 mb-2.5 flex items-center gap-1.5">
             <Pin size={10} className="text-[#9b869c]" strokeWidth={2.5} fill="currentColor" />
             <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9b869c]">
               {tr.foldersPinned}
             </p>
           </div>
-          <FolderGrid>
+          <div className="flex gap-2 overflow-x-auto scrollbar-hide px-5 pb-1">
             {pinnedFolders.map((folder, i) => (
-              <FolderCard
+              <PinnedChip
                 key={folder.id}
                 folder={folder}
                 index={i}
-                preview={previews[folder.id]}
                 prefsVersion={prefsTick}
                 onClick={() => openFolder(folder)}
-                onMore={() => setActiveFolder(folder)}
+                onLongPress={() => setActiveFolder(folder)}
               />
             ))}
-          </FolderGrid>
+          </div>
         </section>
       )}
 
@@ -324,8 +333,8 @@ export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: Folde
       {(loading || aiFolders.length > 0) && (
         <section className="mt-6 px-5">
           <div className="mb-3 flex items-center gap-1.5">
-            <Sparkles size={11} className="text-[#9b869c]" />
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#9b869c]">
+            <Sparkles size={11} className="text-[#d99c5b]" />
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-[#d99c5b]">
               {tr.organizedByAi}
             </p>
           </div>
@@ -390,9 +399,87 @@ function FolderGrid({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-2 gap-3">{children}</div>;
 }
 
+// Compact pinned-folder chip for the horizontal shortcut row.
+// Long-press opens the actions sheet (same gesture as in folder-viewer).
+const CHIP_LONG_PRESS_MS = 450;
+
+function PinnedChip({
+  folder, index, prefsVersion = 0, onClick, onLongPress,
+}: {
+  folder: FolderItem;
+  index: number;
+  prefsVersion?: number;
+  onClick: () => void;
+  onLongPress: () => void;
+}) {
+  const isAi = folder.owner === "ai";
+  const [colorId, setColorId] = useState<string>("default");
+  const [emoji,   setEmoji]   = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || isAi) return;
+    setColorId(getFolderColor(folder.id));
+    setEmoji(getFolderEmoji(folder.id));
+  }, [folder.id, isAi, prefsVersion]);
+
+  const accent = isAi ? "#d99c5b" : getColorHex(colorId);
+
+  // Long-press tracking
+  const timer = useRef<number | null>(null);
+  const fired = useRef(false);
+
+  function handlePressStart() {
+    fired.current = false;
+    timer.current = window.setTimeout(() => {
+      fired.current = true;
+      onLongPress();
+      try { navigator.vibrate?.(35); } catch { /* ignore */ }
+    }, CHIP_LONG_PRESS_MS);
+  }
+  function handlePressEnd() {
+    if (timer.current) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+  }
+  function handleClick() {
+    if (fired.current) { fired.current = false; return; }
+    onClick();
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      onPointerDown={handlePressStart}
+      onPointerUp={handlePressEnd}
+      onPointerLeave={handlePressEnd}
+      onPointerCancel={handlePressEnd}
+      onContextMenu={(e) => { e.preventDefault(); onLongPress(); }}
+      className="flex-shrink-0 flex items-center gap-2 rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] pl-2 pr-3.5 py-1.5 active:scale-95 transition-transform shadow-[0_1px_2px_rgba(74,64,54,0.05)]"
+      style={{ animationDelay: `${index * 30}ms` }}
+    >
+      <span
+        className="flex h-6 w-6 items-center justify-center rounded-full text-[14px] leading-none"
+        style={{ background: `${accent}1f` }}
+      >
+        {emoji ? (
+          <span>{emoji}</span>
+        ) : isAi ? (
+          <Sparkles size={12} style={{ color: accent }} strokeWidth={2.4} />
+        ) : (
+          <Folder size={12} style={{ color: accent }} strokeWidth={2.4} />
+        )}
+      </span>
+      <span className="truncate max-w-[120px] text-[13px] font-semibold text-[#4a4036] dark:text-[#e8ddd4]">
+        {folder.name}
+      </span>
+    </button>
+  );
+}
+
 function FolderSkeleton() {
   return (
-    <div className="rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] overflow-hidden animate-pulse">
+    <div className="rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] overflow-hidden animate-pulse">
       <div className="aspect-[5/3] bg-[#e0d8cc]/40 dark:bg-[#3a3430]/40" />
       <div className="px-3 py-2.5 space-y-1.5">
         <div className="h-3 w-3/4 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />

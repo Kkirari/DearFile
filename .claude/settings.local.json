@@ -23,7 +23,8 @@
       "Bash(node -e \"const p = require\\('pdf-parse'\\); console.log\\(typeof p, p.name || 'fn'\\)\")",
       "Bash(New-Item -ItemType Directory -Force -Path \"D:\\\\workinghard\\\\liff\\\\DearFile\\\\app\\\\api\\\\search\")",
       "Bash(\"ok\")",
-      "PowerShell(\"ok\")"
+      "PowerShell(\"ok\")",
+      "Bash(npx skills *)"
     ]
   }
 }

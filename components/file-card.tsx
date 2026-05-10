@@ -31,7 +31,7 @@ export function FileCard({ file, index = 0, onDelete }: FileCardProps) {
 
   return (
     <div
-      className="card-enter relative flex items-center overflow-hidden rounded-2xl bg-white shadow-[0_1px_3px_rgba(74,64,54,0.08),0_1px_2px_rgba(74,64,54,0.05)] transition-shadow hover:shadow-[0_4px_14px_rgba(74,64,54,0.12)]"
+      className="card-enter relative flex items-center overflow-hidden rounded-2xl bg-[#fbfaf6] shadow-[0_1px_3px_rgba(74,64,54,0.08),0_1px_2px_rgba(74,64,54,0.05)] transition-shadow hover:shadow-[0_4px_14px_rgba(74,64,54,0.12)]"
       style={{ animationDelay: `${index * 55}ms` }}
     >
       <div
@@ -60,7 +60,7 @@ export function FileCard({ file, index = 0, onDelete }: FileCardProps) {
       {menuOpen && (
         <>
           <div className="fixed inset-0 z-10" onClick={() => setMenuOpen(false)} />
-          <div className="absolute right-4 top-12 z-20 min-w-[148px] overflow-hidden rounded-xl border border-[#e0d8cc] bg-white shadow-lg shadow-[#b0a396]/20">
+          <div className="absolute right-4 top-12 z-20 min-w-[148px] overflow-hidden rounded-xl border border-[#e0d8cc] bg-[#fbfaf6] shadow-lg shadow-[#b0a396]/20">
             <a
               href={file.url}
               download={file.name}

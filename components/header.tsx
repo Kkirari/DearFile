@@ -40,7 +40,7 @@ export function Header({ displayName, pictureUrl, totalFiles }: HeaderProps) {
 
         <div className="flex items-center gap-2.5">
           {totalFiles !== undefined && (
-            <span className="rounded-full border border-[#e0d8cc] dark:border-[#3a3430] bg-white dark:bg-[#252220] px-2.5 py-0.5 text-[11px] font-semibold text-[#9b869c]">
+            <span className="rounded-full border border-[#e0d8cc] dark:border-[#3a3430] bg-[#fbfaf6] dark:bg-[#252220] px-2.5 py-0.5 text-[11px] font-semibold text-[#9b869c]">
               {totalFiles} {tr.files}
             </span>
           )}
