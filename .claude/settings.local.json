@@ -24,7 +24,10 @@
       "Bash(New-Item -ItemType Directory -Force -Path \"D:\\\\workinghard\\\\liff\\\\DearFile\\\\app\\\\api\\\\search\")",
       "Bash(\"ok\")",
       "PowerShell(\"ok\")",
-      "Bash(npx skills *)"
+      "Bash(npx skills *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git mv *)"
     ]
   }
 }
