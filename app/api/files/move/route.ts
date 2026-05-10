@@ -1,5 +1,5 @@
 import { CopyObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { s3, BUCKET, isUserOwnedKey, isSafeFolderId } from "@/lib/s3";
+import { s3, BUCKET, isUserOwnedKey, isSafeFolderId, folderMetaExists } from "@/lib/s3";
 import { isAiFolderId } from "@/lib/ai-folders";
 import { renameEntryKey } from "@/lib/search-index";
 
@@ -34,6 +34,12 @@ export async function POST(req: Request) {
         { error: "AI folders are auto-organized and cannot be used as a move destination." },
         { status: 400 }
       );
+    }
+
+    // Reject moves into folders that don't exist — otherwise we silently
+    // create orphan keys under folders/{ghost}/ that no UI can reach.
+    if (target && !(await folderMetaExists(target))) {
+      return Response.json({ error: "Target folder does not exist" }, { status: 404 });
     }
 
     const basename = key.split("/").pop()!;

@@ -47,7 +47,14 @@ async function loadIndex(): Promise<IndexEntry[]> {
     const res = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: INDEX_KEY }));
     const body = await res.Body?.transformToString();
     if (!body) return [];
-    return JSON.parse(body) as IndexEntry[];
+    try {
+      const parsed = JSON.parse(body);
+      // Defensive: an unexpected shape (e.g. corrupted file) shouldn't take the app down.
+      return Array.isArray(parsed) ? (parsed as IndexEntry[]) : [];
+    } catch (parseErr) {
+      console.warn("[search-index] corrupted index file, treating as empty:", parseErr);
+      return [];
+    }
   } catch (err: unknown) {
     if ((err as { name?: string }).name === "NoSuchKey") return [];
     throw err;

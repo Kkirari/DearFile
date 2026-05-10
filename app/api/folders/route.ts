@@ -64,7 +64,14 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const { name, owner = "user" } = await req.json() as { name: string; owner?: string };
+    const { name } = await req.json() as { name?: unknown };
+
+    if (typeof name !== "string" || name.trim().length === 0 || name.length > 100) {
+      return Response.json({ error: "Invalid name (1-100 chars)" }, { status: 400 });
+    }
+
+    // owner is server-controlled — clients cannot create AI-owned folders.
+    const owner: "user" = "user";
     const id        = crypto.randomUUID();
     const key       = `${PREFIX}${id}.json`;
     const createdAt = new Date().toISOString();
@@ -89,13 +96,27 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    const { id, name } = await req.json() as { id: string; name: string };
-    const key = `${PREFIX}${id}.json`;
+    const { id, name } = await req.json() as { id?: unknown; name?: unknown };
 
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+      return Response.json({ error: "Invalid id" }, { status: 400 });
+    }
+    if (typeof name !== "string" || name.trim().length === 0 || name.length > 100) {
+      return Response.json({ error: "Invalid name (1-100 chars)" }, { status: 400 });
+    }
+
+    const key  = `${PREFIX}${id}.json`;
     const res  = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
     const body = await res.Body?.transformToString();
-    const meta = JSON.parse(body ?? "{}");
-    meta.name  = name.trim();
+
+    let meta: Record<string, unknown>;
+    try {
+      meta = JSON.parse(body ?? "{}");
+      if (typeof meta !== "object" || meta === null) meta = {};
+    } catch {
+      return Response.json({ error: "Folder metadata is corrupted" }, { status: 422 });
+    }
+    meta.name = name.trim();
 
     await s3.send(new PutObjectCommand({
       Bucket:      BUCKET,
@@ -114,7 +135,10 @@ export async function PATCH(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    const { id } = await req.json() as { id: string };
+    const { id } = await req.json() as { id?: unknown };
+    if (typeof id !== "string" || !/^[a-zA-Z0-9_-]+$/.test(id)) {
+      return Response.json({ error: "Invalid id" }, { status: 400 });
+    }
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: `${PREFIX}${id}.json` }));
     return Response.json({ ok: true });
   } catch (err) {

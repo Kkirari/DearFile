@@ -2,6 +2,7 @@ import {
   S3Client,
   CopyObjectCommand,
   DeleteObjectCommand,
+  HeadObjectCommand,
   PutObjectTaggingCommand,
   GetObjectTaggingCommand,
 } from "@aws-sdk/client-s3";
@@ -88,6 +89,25 @@ export function isUserOwnedKey(key: unknown): key is string {
   if (key.startsWith("uploads/")) return key.length > "uploads/".length;
   // folders/{id}/... — id must be non-empty and not contain "/"
   return /^folders\/[^/]+\/.+/.test(key);
+}
+
+/**
+ * True if the user folder identified by `folderId` exists (its metadata file
+ * lives in folder-meta/). Use before constructing a destination key on move
+ * so callers cannot create files in ghost folders.
+ */
+export async function folderMetaExists(folderId: string): Promise<boolean> {
+  try {
+    await s3.send(new HeadObjectCommand({
+      Bucket: BUCKET,
+      Key:    `folder-meta/${folderId}.json`,
+    }));
+    return true;
+  } catch (err: unknown) {
+    const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (e.name === "NotFound" || e.$metadata?.httpStatusCode === 404) return false;
+    throw err;
+  }
 }
 
 /**
