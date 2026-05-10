@@ -3,16 +3,19 @@ import {
   GetObjectCommand,
   PutObjectCommand,
   DeleteObjectCommand,
+  DeleteObjectsCommand,
+  type ObjectIdentifier,
 } from "@aws-sdk/client-s3";
 import {
   s3,
   BUCKET,
   userFolderMetaPrefix,
   userFolderMetaKey,
+  userFolderPrefix,
 } from "@/lib/s3";
 import type { FolderItem } from "@/types/folder";
 import { AI_FOLDERS } from "@/lib/ai-folders";
-import { countByAiFolder } from "@/lib/search-index";
+import { countByAiFolder, removeEntriesByUserFolderId } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 
 export async function GET(req: Request) {
@@ -175,11 +178,60 @@ export async function DELETE(req: Request) {
     if (typeof id !== "string" || !/^[a-zA-Z0-9_-]+$/.test(id)) {
       return Response.json({ error: "Invalid id" }, { status: 400 });
     }
+
+    // Cascade — match Google Drive / OS file-manager semantics: deleting a
+    // folder removes everything inside it.
+    //
+    // Order of operations:
+    //   1. List + delete every object under the folder prefix (paginated,
+    //      batched at S3's 1000-per-call limit).
+    //   2. Drop search-index entries that referenced the folder. We use
+    //      user_folder_id rather than re-listing because the rename flow
+    //      (move) always keeps it in sync now.
+    //   3. Delete the folder metadata file LAST — if step 1 or 2 fails
+    //      partway, the folder stays visible so the user can retry. The
+    //      reverse ordering would leave invisible orphan files.
+    const folderPrefix = userFolderPrefix(userId, id);
+    const objectKeys: ObjectIdentifier[] = [];
+    let continuationToken: string | undefined;
+    do {
+      const list = await s3.send(new ListObjectsV2Command({
+        Bucket:            BUCKET,
+        Prefix:            folderPrefix,
+        ContinuationToken: continuationToken,
+      }));
+      for (const o of list.Contents ?? []) {
+        if (o.Key) objectKeys.push({ Key: o.Key });
+      }
+      continuationToken = list.IsTruncated ? list.NextContinuationToken : undefined;
+    } while (continuationToken);
+
+    let deletedFiles = 0;
+    for (let i = 0; i < objectKeys.length; i += 1000) {
+      const batch = objectKeys.slice(i, i + 1000);
+      const res = await s3.send(new DeleteObjectsCommand({
+        Bucket: BUCKET,
+        Delete: { Objects: batch, Quiet: true },
+      }));
+      deletedFiles += batch.length - (res.Errors?.length ?? 0);
+      if (res.Errors?.length) {
+        console.warn("[DELETE /api/folders] batch had errors:", res.Errors);
+      }
+    }
+
+    let removedFromIndex = 0;
+    try {
+      removedFromIndex = await removeEntriesByUserFolderId(userId, id);
+    } catch (idxErr) {
+      console.warn("[DELETE /api/folders] index cleanup failed (non-fatal):", idxErr);
+    }
+
     await s3.send(new DeleteObjectCommand({
       Bucket: BUCKET,
       Key:    userFolderMetaKey(userId, id),
     }));
-    return Response.json({ ok: true });
+
+    return Response.json({ ok: true, deletedFiles, removedFromIndex });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("[DELETE /api/folders]", message);

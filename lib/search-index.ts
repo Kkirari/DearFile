@@ -102,6 +102,16 @@ export function removeEntry(userId: string, key: string): Promise<void> {
   });
 }
 
+/**
+ * Derive user_folder_id from a per-user S3 key. Returns null for inbox keys.
+ *   users/{U}/folders/{F}/file → F
+ *   users/{U}/uploads/file     → null
+ */
+function userFolderIdFromKey(key: string): string | null {
+  const m = key.match(/^users\/[^/]+\/folders\/([^/]+)\//);
+  return m?.[1] ?? null;
+}
+
 export function renameEntryKey(userId: string, oldKey: string, newKey: string): Promise<void> {
   return withIndexLock(userId, async () => {
     const idx = await loadIndex(userId);
@@ -109,7 +119,25 @@ export function renameEntryKey(userId: string, oldKey: string, newKey: string): 
     if (!target) return;
     target.key = newKey;
     target.filename = newKey.split("/").pop() ?? target.filename;
+    // Keep user_folder_id in sync with the new path — moves between
+    // folders/inbox previously left this stale, which broke folder-delete
+    // cascades and AI-folder counts after a move.
+    target.user_folder_id = userFolderIdFromKey(newKey);
     await saveIndex(userId, idx);
+  });
+}
+
+/**
+ * Drop every index entry whose user_folder_id matches `folderId`. Used by
+ * folder cascade delete. Returns the count removed.
+ */
+export function removeEntriesByUserFolderId(userId: string, folderId: string): Promise<number> {
+  return withIndexLock(userId, async () => {
+    const idx = await loadIndex(userId);
+    const filtered = idx.filter((e) => e.user_folder_id !== folderId);
+    const removed = idx.length - filtered.length;
+    if (removed > 0) await saveIndex(userId, filtered);
+    return removed;
   });
 }
 
