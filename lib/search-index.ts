@@ -63,27 +63,44 @@ async function saveIndex(entries: IndexEntry[]): Promise<void> {
   }));
 }
 
-export async function upsertEntry(entry: IndexEntry): Promise<void> {
-  const idx = await loadIndex();
-  const existing = idx.findIndex((e) => e.key === entry.key);
-  if (existing >= 0) idx[existing] = entry;
-  else idx.push(entry);
-  await saveIndex(idx);
+// Serialize index mutations within a single process so concurrent
+// load→mutate→save cycles don't lose updates. Cross-instance races still
+// possible — a proper fix needs ETag-conditional writes or a real KV store.
+let mutationChain: Promise<unknown> = Promise.resolve();
+
+function withIndexLock<T>(fn: () => Promise<T>): Promise<T> {
+  const next = mutationChain.then(fn, fn);
+  mutationChain = next.catch(() => undefined);
+  return next;
 }
 
-export async function removeEntry(key: string): Promise<void> {
-  const idx = await loadIndex();
-  const filtered = idx.filter((e) => e.key !== key);
-  if (filtered.length !== idx.length) await saveIndex(filtered);
+export function upsertEntry(entry: IndexEntry): Promise<void> {
+  return withIndexLock(async () => {
+    const idx = await loadIndex();
+    const existing = idx.findIndex((e) => e.key === entry.key);
+    if (existing >= 0) idx[existing] = entry;
+    else idx.push(entry);
+    await saveIndex(idx);
+  });
 }
 
-export async function renameEntryKey(oldKey: string, newKey: string): Promise<void> {
-  const idx = await loadIndex();
-  const target = idx.find((e) => e.key === oldKey);
-  if (!target) return;
-  target.key = newKey;
-  target.filename = newKey.split("/").pop() ?? target.filename;
-  await saveIndex(idx);
+export function removeEntry(key: string): Promise<void> {
+  return withIndexLock(async () => {
+    const idx = await loadIndex();
+    const filtered = idx.filter((e) => e.key !== key);
+    if (filtered.length !== idx.length) await saveIndex(filtered);
+  });
+}
+
+export function renameEntryKey(oldKey: string, newKey: string): Promise<void> {
+  return withIndexLock(async () => {
+    const idx = await loadIndex();
+    const target = idx.find((e) => e.key === oldKey);
+    if (!target) return;
+    target.key = newKey;
+    target.filename = newKey.split("/").pop() ?? target.filename;
+    await saveIndex(idx);
+  });
 }
 
 export async function getAllEntries(): Promise<IndexEntry[]> {

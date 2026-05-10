@@ -4,6 +4,10 @@
  * _search-index.json file. Irreversible.
  *
  * Triggered from the Developer section on the Profile tab.
+ *
+ * Gated by:
+ *   1. ADMIN_TOKEN env var must be set (endpoint is 403 otherwise — safe default)
+ *   2. Caller must send matching `x-admin-token` header
  */
 
 import {
@@ -54,7 +58,19 @@ async function deleteInBatches(keys: ObjectIdentifier[]): Promise<number> {
   return deleted;
 }
 
-export async function POST() {
+export async function POST(req: Request) {
+  // Defense in depth: refuse if not configured, then verify the header.
+  const adminToken = process.env.ADMIN_TOKEN;
+  if (!adminToken) {
+    return Response.json(
+      { error: "Format endpoint disabled — set ADMIN_TOKEN to enable" },
+      { status: 403 }
+    );
+  }
+  if (req.headers.get("x-admin-token") !== adminToken) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   try {
     // 1. Collect all keys under prefixes
     const prefixed = (
