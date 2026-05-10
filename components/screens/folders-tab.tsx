@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import {
   Plus, Sparkles, FolderOpen, Folder, Inbox, Search, X,
-  ArrowDownWideNarrow, Check, Pin, History,
+  ArrowDownWideNarrow, Check, Pin, History, MoreHorizontal,
 } from "lucide-react";
 import { FolderCard } from "@/components/folder-card";
 import { CreateFolderSheet } from "@/components/create-folder-sheet";
@@ -456,32 +456,46 @@ function PinnedChip({
   }
 
   return (
-    <button
-      onClick={handleClick}
-      onPointerDown={handlePressStart}
-      onPointerUp={handlePressEnd}
-      onPointerLeave={handlePressEnd}
-      onPointerCancel={handlePressEnd}
-      onContextMenu={(e) => { e.preventDefault(); onLongPress(); }}
-      className="flex-shrink-0 flex items-center gap-2 rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] pl-2 pr-3.5 py-1.5 active:scale-95 transition-transform shadow-[0_1px_2px_rgba(74,64,54,0.05)]"
+    <div
+      className="flex-shrink-0 flex items-center rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] shadow-[0_1px_2px_rgba(74,64,54,0.05)]"
       style={{ animationDelay: `${index * 30}ms` }}
     >
-      <span
-        className="flex h-6 w-6 items-center justify-center rounded-full text-[14px] leading-none"
-        style={{ background: `${accent}1f` }}
+      {/* Main chip body — tap = open, long-press still opens menu */}
+      <button
+        onClick={handleClick}
+        onPointerDown={handlePressStart}
+        onPointerUp={handlePressEnd}
+        onPointerLeave={handlePressEnd}
+        onPointerCancel={handlePressEnd}
+        onContextMenu={(e) => { e.preventDefault(); onLongPress(); }}
+        className="flex items-center gap-2 pl-2 pr-2 py-1.5 active:scale-95 transition-transform rounded-l-full"
       >
-        {emoji ? (
-          <span>{emoji}</span>
-        ) : isAi ? (
-          <Sparkles size={12} style={{ color: accent }} strokeWidth={2.4} />
-        ) : (
-          <Folder size={12} style={{ color: accent }} strokeWidth={2.4} />
-        )}
-      </span>
-      <span className="truncate max-w-[120px] text-[13px] font-semibold text-[#4a4036] dark:text-[#e8ddd4]">
-        {folder.name}
-      </span>
-    </button>
+        <span
+          className="flex h-6 w-6 items-center justify-center rounded-full text-[14px] leading-none"
+          style={{ background: `${accent}1f` }}
+        >
+          {emoji ? (
+            <span>{emoji}</span>
+          ) : isAi ? (
+            <Sparkles size={12} style={{ color: accent }} strokeWidth={2.4} />
+          ) : (
+            <Folder size={12} style={{ color: accent }} strokeWidth={2.4} />
+          )}
+        </span>
+        <span className="truncate max-w-[120px] text-[13px] font-semibold text-[#4a4036] dark:text-[#e8ddd4]">
+          {folder.name}
+        </span>
+      </button>
+      {/* More button — explicit affordance for unpin / customize / etc.
+          Long-press still works for users who already learned the gesture. */}
+      <button
+        onClick={(e) => { e.stopPropagation(); onLongPress(); }}
+        aria-label="More actions"
+        className="flex h-7 w-7 items-center justify-center rounded-full text-[#b0a396] dark:text-[#6e6460] active:bg-[#e0d8cc] dark:active:bg-[#3a3430] transition-colors mr-1"
+      >
+        <MoreHorizontal size={14} />
+      </button>
+    </div>
   );
 }
 
