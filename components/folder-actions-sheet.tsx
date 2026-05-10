@@ -6,6 +6,7 @@ import { FolderCustomizeSheet } from "@/components/folder-customize-sheet";
 import { isPinned as isPinnedPref, togglePin } from "@/lib/folder-prefs";
 import { useLanguage } from "@/providers/language-provider";
 import type { FolderItem } from "@/types/folder";
+import { apiFetch } from "@/lib/api-client";
 
 interface FolderActionsSheetProps {
   folder: FolderItem;
@@ -58,7 +59,7 @@ export function FolderActionsSheet({
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch("/api/folders", {
+      const res = await apiFetch("/api/folders", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: folder.id, name: trimmed }),
@@ -80,7 +81,7 @@ export function FolderActionsSheet({
     }
     setDeleting(true);
     try {
-      await fetch("/api/folders", {
+      await apiFetch("/api/folders", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: folder.id }),

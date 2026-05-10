@@ -4,18 +4,30 @@ import {
   PutObjectCommand,
   DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
-import { s3, BUCKET } from "@/lib/s3";
+import {
+  s3,
+  BUCKET,
+  userFolderMetaPrefix,
+  userFolderMetaKey,
+} from "@/lib/s3";
 import type { FolderItem } from "@/types/folder";
 import { AI_FOLDERS } from "@/lib/ai-folders";
 import { countByAiFolder } from "@/lib/search-index";
+import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 
-const PREFIX = "folder-meta/";
-
-export async function GET() {
+export async function GET(req: Request) {
+  let userId: string;
   try {
-    // User folders (stored as JSON metadata files)
+    userId = await requireUserId(req);
+  } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
+    throw err;
+  }
+
+  try {
+    const metaPrefix = userFolderMetaPrefix(userId);
     const { Contents = [] } = await s3.send(
-      new ListObjectsV2Command({ Bucket: BUCKET, Prefix: PREFIX })
+      new ListObjectsV2Command({ Bucket: BUCKET, Prefix: metaPrefix })
     );
     const jsonKeys = Contents.filter((obj) => obj.Key?.endsWith(".json"));
 
@@ -23,13 +35,14 @@ export async function GET() {
       jsonKeys.map(async (obj) => {
         const res  = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: obj.Key! }));
         const body = await res.Body?.transformToString();
-        const meta = JSON.parse(body ?? "{}");
+        let meta: Record<string, unknown> = {};
+        try { meta = JSON.parse(body ?? "{}"); } catch { meta = {}; }
         return {
-          id:        meta.id,
-          name:      meta.name,
+          id:        meta.id as string,
+          name:      meta.name as string,
           count:     0,
-          updatedAt: meta.createdAt,
-          owner:     meta.owner ?? "user",
+          updatedAt: (meta.createdAt as string) ?? new Date().toISOString(),
+          owner:     "user",
         } satisfies FolderItem;
       })
     );
@@ -37,13 +50,13 @@ export async function GET() {
     // AI folders from catalog — counts pulled from search index
     let counts: Record<string, number> = {};
     try {
-      counts = await countByAiFolder();
+      counts = await countByAiFolder(userId);
     } catch (err) {
       console.warn("[folders] index count failed:", err);
     }
 
     const aiFoldersList: FolderItem[] = AI_FOLDERS
-      .filter((f) => (counts[f.id] ?? 0) > 0) // hide empty AI folders
+      .filter((f) => (counts[f.id] ?? 0) > 0)
       .map((f) => ({
         id:        f.id,
         name:      f.name,
@@ -63,6 +76,14 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  let userId: string;
+  try {
+    userId = await requireUserId(req);
+  } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
+    throw err;
+  }
+
   try {
     const { name } = await req.json() as { name?: unknown };
 
@@ -70,10 +91,9 @@ export async function POST(req: Request) {
       return Response.json({ error: "Invalid name (1-100 chars)" }, { status: 400 });
     }
 
-    // owner is server-controlled — clients cannot create AI-owned folders.
     const owner: "user" = "user";
     const id        = crypto.randomUUID();
-    const key       = `${PREFIX}${id}.json`;
+    const key       = userFolderMetaKey(userId, id);
     const createdAt = new Date().toISOString();
     const meta      = { id, name: name.trim(), owner, createdAt };
 
@@ -95,6 +115,14 @@ export async function POST(req: Request) {
 }
 
 export async function PATCH(req: Request) {
+  let userId: string;
+  try {
+    userId = await requireUserId(req);
+  } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
+    throw err;
+  }
+
   try {
     const { id, name } = await req.json() as { id?: unknown; name?: unknown };
 
@@ -105,7 +133,7 @@ export async function PATCH(req: Request) {
       return Response.json({ error: "Invalid name (1-100 chars)" }, { status: 400 });
     }
 
-    const key  = `${PREFIX}${id}.json`;
+    const key  = userFolderMetaKey(userId, id);
     const res  = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: key }));
     const body = await res.Body?.transformToString();
 
@@ -134,12 +162,23 @@ export async function PATCH(req: Request) {
 }
 
 export async function DELETE(req: Request) {
+  let userId: string;
+  try {
+    userId = await requireUserId(req);
+  } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
+    throw err;
+  }
+
   try {
     const { id } = await req.json() as { id?: unknown };
     if (typeof id !== "string" || !/^[a-zA-Z0-9_-]+$/.test(id)) {
       return Response.json({ error: "Invalid id" }, { status: 400 });
     }
-    await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: `${PREFIX}${id}.json` }));
+    await s3.send(new DeleteObjectCommand({
+      Bucket: BUCKET,
+      Key:    userFolderMetaKey(userId, id),
+    }));
     return Response.json({ ok: true });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

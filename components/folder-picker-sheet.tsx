@@ -4,6 +4,7 @@ import { useState } from "react";
 import { X, Inbox, Folder, Sparkles, Plus, Check } from "lucide-react";
 import { CreateFolderSheet } from "@/components/create-folder-sheet";
 import type { FolderItem } from "@/types/folder";
+import { apiFetch } from "@/lib/api-client";
 
 interface FolderPickerSheetProps {
   folders: FolderItem[];
@@ -43,7 +44,7 @@ export function FolderPickerSheet({
   async function handleFolderCreated() {
     setCreateOpen(false);
     try {
-      const res  = await fetch("/api/folders");
+      const res  = await apiFetch("/api/folders");
       const data = await res.json() as { folders?: FolderItem[] };
       if (data.folders) setLocalFolders(data.folders);
     } catch { /* ignore */ }

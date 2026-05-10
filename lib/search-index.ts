@@ -12,9 +12,7 @@
  */
 
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { s3, BUCKET } from "./s3";
-
-const INDEX_KEY = "_search-index.json";
+import { s3, BUCKET, userSearchIndexKey } from "./s3";
 
 export interface IndexEntry {
   key: string;                    // current S3 key (after rename)
@@ -40,11 +38,14 @@ export interface ScoredEntry extends IndexEntry {
 export type SortMode = "relevance" | "newest" | "oldest" | "largest";
 export type FilterMode = "all" | "photos" | "documents" | "finance" | "academic";
 
-// ── Persistence ───────────────────────────────────────────────────────────────
+// ── Persistence (per-user) ────────────────────────────────────────────────────
 
-async function loadIndex(): Promise<IndexEntry[]> {
+async function loadIndex(userId: string): Promise<IndexEntry[]> {
   try {
-    const res = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: INDEX_KEY }));
+    const res = await s3.send(new GetObjectCommand({
+      Bucket: BUCKET,
+      Key:    userSearchIndexKey(userId),
+    }));
     const body = await res.Body?.transformToString();
     if (!body) return [];
     try {
@@ -61,68 +62,70 @@ async function loadIndex(): Promise<IndexEntry[]> {
   }
 }
 
-async function saveIndex(entries: IndexEntry[]): Promise<void> {
+async function saveIndex(userId: string, entries: IndexEntry[]): Promise<void> {
   await s3.send(new PutObjectCommand({
     Bucket:      BUCKET,
-    Key:         INDEX_KEY,
+    Key:         userSearchIndexKey(userId),
     Body:        JSON.stringify(entries),
     ContentType: "application/json",
   }));
 }
 
-// Serialize index mutations within a single process so concurrent
-// load→mutate→save cycles don't lose updates. Cross-instance races still
-// possible — a proper fix needs ETag-conditional writes or a real KV store.
-let mutationChain: Promise<unknown> = Promise.resolve();
+// Per-user serialization. Concurrent writes to the SAME user's index would
+// otherwise lose updates (load→mutate→save with no ETag). Different users
+// don't block each other. Cross-instance races still possible — a proper
+// fix needs ETag-conditional writes or a real KV store.
+const mutationChains = new Map<string, Promise<unknown>>();
 
-function withIndexLock<T>(fn: () => Promise<T>): Promise<T> {
-  const next = mutationChain.then(fn, fn);
-  mutationChain = next.catch(() => undefined);
+function withIndexLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = mutationChains.get(userId) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  mutationChains.set(userId, next.catch(() => undefined));
   return next;
 }
 
-export function upsertEntry(entry: IndexEntry): Promise<void> {
-  return withIndexLock(async () => {
-    const idx = await loadIndex();
+export function upsertEntry(userId: string, entry: IndexEntry): Promise<void> {
+  return withIndexLock(userId, async () => {
+    const idx = await loadIndex(userId);
     const existing = idx.findIndex((e) => e.key === entry.key);
     if (existing >= 0) idx[existing] = entry;
     else idx.push(entry);
-    await saveIndex(idx);
+    await saveIndex(userId, idx);
   });
 }
 
-export function removeEntry(key: string): Promise<void> {
-  return withIndexLock(async () => {
-    const idx = await loadIndex();
+export function removeEntry(userId: string, key: string): Promise<void> {
+  return withIndexLock(userId, async () => {
+    const idx = await loadIndex(userId);
     const filtered = idx.filter((e) => e.key !== key);
-    if (filtered.length !== idx.length) await saveIndex(filtered);
+    if (filtered.length !== idx.length) await saveIndex(userId, filtered);
   });
 }
 
-export function renameEntryKey(oldKey: string, newKey: string): Promise<void> {
-  return withIndexLock(async () => {
-    const idx = await loadIndex();
+export function renameEntryKey(userId: string, oldKey: string, newKey: string): Promise<void> {
+  return withIndexLock(userId, async () => {
+    const idx = await loadIndex(userId);
     const target = idx.find((e) => e.key === oldKey);
     if (!target) return;
     target.key = newKey;
     target.filename = newKey.split("/").pop() ?? target.filename;
-    await saveIndex(idx);
+    await saveIndex(userId, idx);
   });
 }
 
-export async function getAllEntries(): Promise<IndexEntry[]> {
-  return loadIndex();
+export async function getAllEntries(userId: string): Promise<IndexEntry[]> {
+  return loadIndex(userId);
 }
 
-export async function countByAiFolder(): Promise<Record<string, number>> {
-  const idx = await loadIndex();
+export async function countByAiFolder(userId: string): Promise<Record<string, number>> {
+  const idx = await loadIndex(userId);
   const out: Record<string, number> = {};
   for (const e of idx) out[e.ai_folder_id] = (out[e.ai_folder_id] ?? 0) + 1;
   return out;
 }
 
-export async function entriesByAiFolder(folderId: string): Promise<IndexEntry[]> {
-  const idx = await loadIndex();
+export async function entriesByAiFolder(userId: string, folderId: string): Promise<IndexEntry[]> {
+  const idx = await loadIndex(userId);
   return idx.filter((e) => e.ai_folder_id === folderId);
 }
 
@@ -208,13 +211,14 @@ export interface SearchOptions {
  * Field weights:  filename(2.5) > subject(2.0) > keywords(1.5) > detail(0.8)
  */
 export async function searchScored(
+  userId: string,
   query: string,
   options: SearchOptions = {}
 ): Promise<ScoredEntry[]> {
   const { filter = "all", sort = "relevance" } = options;
   const q = query.trim().toLowerCase();
 
-  const idx = await loadIndex();
+  const idx = await loadIndex(userId);
   const filtered = idx.filter((e) => matchesFilter(e, filter));
 
   // No query → return all (filtered) entries with score 0
@@ -290,23 +294,17 @@ function applySort(entries: ScoredEntry[], sort: SortMode): ScoredEntry[] {
   }
 }
 
-// ── Legacy plain search (kept for backward compatibility) ─────────────────────
-
-export async function search(query: string): Promise<IndexEntry[]> {
-  return searchScored(query);
-}
-
 // ── Suggestions for autocomplete ──────────────────────────────────────────────
 
 /**
  * Returns up to N keyword/filename suggestions whose start matches the query.
  * Used by the autocomplete dropdown while user is typing.
  */
-export async function suggest(query: string, limit = 6): Promise<string[]> {
+export async function suggest(userId: string, query: string, limit = 6): Promise<string[]> {
   const q = query.trim().toLowerCase();
   if (!q || q.length < 1) return [];
 
-  const idx = await loadIndex();
+  const idx = await loadIndex(userId);
   const seen = new Set<string>();
   const results: { term: string; weight: number }[] = [];
 
@@ -347,8 +345,8 @@ export async function suggest(query: string, limit = 6): Promise<string[]> {
 
 // ── Category counts (for filter chip badges) ──────────────────────────────────
 
-export async function countByFilter(): Promise<Record<FilterMode, number>> {
-  const idx = await loadIndex();
+export async function countByFilter(userId: string): Promise<Record<FilterMode, number>> {
+  const idx = await loadIndex(userId);
   const out: Record<FilterMode, number> = {
     all: idx.length,
     photos: 0,

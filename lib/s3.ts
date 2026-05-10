@@ -77,30 +77,66 @@ export async function getS3ObjectTags(key: string): Promise<Record<string, strin
   return out;
 }
 
-/**
- * True only for keys inside the user-data namespace: `uploads/...` or
- * `folders/{folderId}/...`. Rejects empty keys, path traversal, and system
- * keys (e.g. `folder-meta/...`, `_search-index.json`). Use this on every
- * client-supplied key before any S3 mutation.
- */
-export function isUserOwnedKey(key: unknown): key is string {
-  if (typeof key !== "string" || key.length === 0) return false;
-  if (key.includes("..") || key.includes("//")) return false;
-  if (key.startsWith("uploads/")) return key.length > "uploads/".length;
-  // folders/{id}/... — id must be non-empty and not contain "/"
-  return /^folders\/[^/]+\/.+/.test(key);
+// ── Per-user prefix layout ────────────────────────────────────────────────
+//
+// Every object owned by user U lives under `users/{U}/...`:
+//
+//   users/{U}/uploads/{ts}-{name}            — inbox
+//   users/{U}/folders/{folderId}/{ts}-{name} — file inside a folder
+//   users/{U}/folder-meta/{folderId}.json    — folder metadata
+//   users/{U}/_search-index.json             — that user's search index
+//
+// All client-supplied keys, ids, and folder ids are validated before being
+// composed into a path so the namespace can't be escaped.
+
+export function userPrefix(userId: string): string {
+  return `users/${userId}/`;
+}
+export function userUploadsPrefix(userId: string): string {
+  return `users/${userId}/uploads/`;
+}
+export function userFoldersPrefix(userId: string): string {
+  return `users/${userId}/folders/`;
+}
+export function userFolderPrefix(userId: string, folderId: string): string {
+  return `users/${userId}/folders/${folderId}/`;
+}
+export function userFolderMetaPrefix(userId: string): string {
+  return `users/${userId}/folder-meta/`;
+}
+export function userFolderMetaKey(userId: string, folderId: string): string {
+  return `users/${userId}/folder-meta/${folderId}.json`;
+}
+export function userSearchIndexKey(userId: string): string {
+  return `users/${userId}/_search-index.json`;
 }
 
 /**
- * True if the user folder identified by `folderId` exists (its metadata file
- * lives in folder-meta/). Use before constructing a destination key on move
- * so callers cannot create files in ghost folders.
+ * True only for keys that are inside the given user's data namespace
+ * (`users/{userId}/uploads/...` or `users/{userId}/folders/{id}/...`).
+ * Rejects empty keys, path traversal, and other users' keys. Use this on
+ * every client-supplied key before any S3 mutation.
  */
-export async function folderMetaExists(folderId: string): Promise<boolean> {
+export function isUserOwnedKey(key: unknown, userId: string): key is string {
+  if (typeof key !== "string" || key.length === 0) return false;
+  if (key.includes("..") || key.includes("//")) return false;
+  const expected = `users/${userId}/`;
+  if (!key.startsWith(expected)) return false;
+  const rest = key.slice(expected.length);
+  if (rest.startsWith("uploads/")) return rest.length > "uploads/".length;
+  return /^folders\/[^/]+\/.+/.test(rest);
+}
+
+/**
+ * True if `folderId` exists for `userId` — i.e. its metadata file lives in
+ * the user's folder-meta/ prefix. Use before constructing a destination key
+ * on move so callers cannot create files in ghost (or other users') folders.
+ */
+export async function folderMetaExists(userId: string, folderId: string): Promise<boolean> {
   try {
     await s3.send(new HeadObjectCommand({
       Bucket: BUCKET,
-      Key:    `folder-meta/${folderId}.json`,
+      Key:    userFolderMetaKey(userId, folderId),
     }));
     return true;
   } catch (err: unknown) {

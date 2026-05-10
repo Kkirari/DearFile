@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState } from "react";
 import type { Profile } from "@liff/get-profile";
+import { configureApiAuth, markApiAuthReady } from "@/lib/api-client";
 
 type LiffState = {
   ready: boolean;
@@ -28,9 +29,20 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
+    const liffId      = process.env.NEXT_PUBLIC_LIFF_ID;
+    const devUserId   = process.env.NEXT_PUBLIC_DEV_USER_ID;
+
+    // Local dev shortcut — no LIFF id but a dev user configured: send a
+    // literal "dev" Bearer token that the API maps to DEV_USER_ID server-side.
     if (!liffId) {
+      if (devUserId) {
+        console.log("[LIFF] no NEXT_PUBLIC_LIFF_ID — using dev bypass for", devUserId);
+        configureApiAuth(() => "dev");
+        setReady(true);
+        return;
+      }
       setError("NEXT_PUBLIC_LIFF_ID is not set");
+      markApiAuthReady(null);
       setReady(true);
       return;
     }
@@ -60,6 +72,10 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
           pictureUrl: userProfile.pictureUrl,
         });
 
+        // LIFF refreshes the ID token internally; reading it on every fetch
+        // gives apiFetch a fresh-enough token without us tracking expiry.
+        configureApiAuth(() => liff.getIDToken());
+
         setProfile(userProfile);
         setLoggedIn(true);
       })
@@ -67,6 +83,7 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
         const msg = err instanceof Error ? err.message : "LIFF init failed";
         console.error("[LIFF] error:", err);
         setError(msg);
+        markApiAuthReady(null);
       })
       .finally(() => {
         console.log("[LIFF] ready");

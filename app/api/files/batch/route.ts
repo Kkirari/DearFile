@@ -8,9 +8,18 @@ import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
-import { s3, BUCKET, isUserOwnedKey, isSafeFolderId, folderMetaExists } from "@/lib/s3";
+import {
+  s3,
+  BUCKET,
+  isUserOwnedKey,
+  isSafeFolderId,
+  folderMetaExists,
+  userUploadsPrefix,
+  userFolderPrefix,
+} from "@/lib/s3";
 import { isAiFolderId } from "@/lib/ai-folders";
 import { removeEntry, renameEntryKey } from "@/lib/search-index";
+import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 
 interface BatchRequest {
   action: "delete" | "move";
@@ -20,6 +29,14 @@ interface BatchRequest {
 }
 
 export async function POST(req: Request) {
+  let userId: string;
+  try {
+    userId = await requireUserId(req);
+  } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
+    throw err;
+  }
+
   try {
     const body = await req.json() as BatchRequest;
     const { action, keys, targetFolderId } = body;
@@ -28,28 +45,23 @@ export async function POST(req: Request) {
       return Response.json({ error: "Missing keys array" }, { status: 400 });
     }
 
-    // Reject the whole batch if any key escapes the user-data namespace —
-    // a single bad entry indicates a buggy or malicious caller; partial
-    // success would be confusing.
-    if (!keys.every(isUserOwnedKey)) {
+    if (!keys.every((k) => isUserOwnedKey(k, userId))) {
       return Response.json(
-        { error: "All keys must be under uploads/ or folders/{id}/" },
+        { error: "All keys must belong to the authenticated user" },
         { status: 400 }
       );
     }
 
     // ── DELETE ─────────────────────────────────────────────────────────
     if (action === "delete") {
-      // S3 batch delete (max 1000 per request)
       const objects = keys.map((Key) => ({ Key }));
       const res = await s3.send(new DeleteObjectsCommand({
         Bucket: BUCKET,
         Delete: { Objects: objects, Quiet: true },
       }));
 
-      // Best-effort search index cleanup
       await Promise.all(keys.map(async (key) => {
-        try { await removeEntry(key); }
+        try { await removeEntry(userId, key); }
         catch { /* ignore */ }
       }));
 
@@ -79,19 +91,18 @@ export async function POST(req: Request) {
         );
       }
 
-      if (target && !(await folderMetaExists(target))) {
+      if (target && !(await folderMetaExists(userId, target))) {
         return Response.json({ error: "Target folder does not exist" }, { status: 404 });
       }
 
       let movedCount = 0;
       const errors: string[] = [];
 
-      // Sequential to keep error reporting clear (could parallelize)
       for (const key of keys) {
         const basename = key.split("/").pop()!;
         const newKey   = target
-          ? `folders/${target}/${basename}`
-          : `uploads/${basename}`;
+          ? `${userFolderPrefix(userId, target)}${basename}`
+          : `${userUploadsPrefix(userId)}${basename}`;
         if (key === newKey) { movedCount++; continue; }
 
         try {
@@ -101,7 +112,7 @@ export async function POST(req: Request) {
             Key:        newKey,
           }));
           await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
-          try { await renameEntryKey(key, newKey); } catch { /* ignore */ }
+          try { await renameEntryKey(userId, key, newKey); } catch { /* ignore */ }
           movedCount++;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);

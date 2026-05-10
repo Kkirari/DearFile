@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { FileItem } from "@/types/file";
+import { apiFetch } from "@/lib/api-client";
 
 interface UseFilesResult {
   files: FileItem[];
@@ -27,7 +28,7 @@ export function useFiles(folderId?: string | null): UseFilesResult {
     try {
       setLoading(true);
       setError(null);
-      const res  = await fetch(url);
+      const res  = await apiFetch(url);
       if (!res.ok) throw new Error(`Failed to fetch files (${res.status})`);
       const data = await res.json() as { files: FileItem[] };
       setFiles(data.files);
