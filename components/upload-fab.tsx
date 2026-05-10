@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import { Upload, X, FolderOpen, Camera, Image as ImageIcon, CheckCircle2 } from "lucide-react";
 import { FolderPickerSheet } from "@/components/folder-picker-sheet";
 import type { FolderItem } from "@/types/folder";
+import { apiFetch } from "@/lib/api-client";
 
 // SVG ring: r=22 → circumference = 2π×22 ≈ 138.23
 const RING_R = 22;
@@ -101,7 +102,7 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
     setErrorMsg(null);
 
     try {
-      const res = await fetch("/api/upload", {
+      const res = await apiFetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -119,7 +120,7 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
 
       // Auto-analyze: rename + tag + index in S3, non-blocking
       try {
-        await fetch("/api/analyze", {
+        await apiFetch("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ key }),

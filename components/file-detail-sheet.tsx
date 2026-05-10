@@ -10,6 +10,7 @@ import { ShareSheet } from "@/components/share-sheet";
 import { formatBytes, formatDate, getFileIcon } from "@/lib/utils";
 import type { FileItem } from "@/types/file";
 import type { FolderItem } from "@/types/folder";
+import { apiFetch } from "@/lib/api-client";
 
 // ── Type config ───────────────────────────────────────────────────────────────
 
@@ -81,7 +82,7 @@ export function FileDetailSheet({
     setMovePickerOpen(false);
     setMoving(true);
     try {
-      const res = await fetch("/api/files/move", {
+      const res = await apiFetch("/api/files/move", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key: file.id, targetFolderId }),
@@ -102,7 +103,7 @@ export function FileDetailSheet({
     }
     setDeleting(true);
     try {
-      await fetch("/api/files", {
+      await apiFetch("/api/files", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ key: file.id }),

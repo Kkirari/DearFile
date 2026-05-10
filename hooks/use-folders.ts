@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { FolderItem } from "@/types/folder";
+import { apiFetch } from "@/lib/api-client";
 
 export function useFolders() {
   const [folders, setFolders] = useState<FolderItem[]>([]);
@@ -12,7 +13,7 @@ export function useFolders() {
     setLoading(true);
     setError(null);
     try {
-      const res  = await fetch("/api/folders");
+      const res  = await apiFetch("/api/folders");
       const data = await res.json() as { folders?: FolderItem[]; error?: string };
       if (data.error) throw new Error(data.error);
       setFolders(data.folders ?? []);

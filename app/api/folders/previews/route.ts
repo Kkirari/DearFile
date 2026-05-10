@@ -10,9 +10,17 @@ import {
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { s3, BUCKET, mimeFromFilename } from "@/lib/s3";
+import {
+  s3,
+  BUCKET,
+  mimeFromFilename,
+  userUploadsPrefix,
+  userFolderPrefix,
+  userFolderMetaPrefix,
+} from "@/lib/s3";
 import { AI_FOLDERS } from "@/lib/ai-folders";
 import { getAllEntries } from "@/lib/search-index";
+import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 
 const PREVIEW_COUNT = 4;
 const URL_TTL = 3600;
@@ -34,7 +42,6 @@ async function listFolderPreviews(prefix: string): Promise<{ items: { Key: strin
     Prefix: prefix,
   }));
   const objects = (res.Contents ?? []).filter((o) => o.Key && (o.Size ?? 0) > 0);
-  // Sort newest first using LastModified
   objects.sort((a, b) => {
     const ad = a.LastModified ? new Date(a.LastModified).getTime() : 0;
     const bd = b.LastModified ? new Date(b.LastModified).getTime() : 0;
@@ -57,38 +64,44 @@ async function previewItemFromKey(key: string): Promise<PreviewItem> {
   return { url, isImage: mimeType.startsWith("image/"), mimeType };
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  let userId: string;
+  try {
+    userId = await requireUserId(req);
+  } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
+    throw err;
+  }
+
   try {
     const previews: Record<string, FolderPreview> = {};
 
     // ── Inbox (uploads/) ──────────────────────────────────────────────
     {
-      const { items, total } = await listFolderPreviews("uploads/");
+      const { items, total } = await listFolderPreviews(userUploadsPrefix(userId));
       const thumbs = await Promise.all(items.map((it) => previewItemFromKey(it.Key)));
       previews["inbox"] = { total, thumbnails: thumbs };
     }
 
-    // ── User folders (folders/{uuid}/) ────────────────────────────────
-    // List the folder-meta/ prefix to get folder IDs, then preview each
+    // ── User folders ──────────────────────────────────────────────────
     const metaRes = await s3.send(new ListObjectsV2Command({
       Bucket: BUCKET,
-      Prefix: "folder-meta/",
+      Prefix: userFolderMetaPrefix(userId),
     }));
     const folderIds = (metaRes.Contents ?? [])
       .map((o) => o.Key)
       .filter((k): k is string => !!k && k.endsWith(".json"))
-      .map((k) => k.replace("folder-meta/", "").replace(".json", ""));
+      .map((k) => k.replace(userFolderMetaPrefix(userId), "").replace(".json", ""));
 
     await Promise.all(folderIds.map(async (id) => {
-      const { items, total } = await listFolderPreviews(`folders/${id}/`);
+      const { items, total } = await listFolderPreviews(userFolderPrefix(userId, id));
       const thumbs = await Promise.all(items.map((it) => previewItemFromKey(it.Key)));
       previews[id] = { total, thumbnails: thumbs };
     }));
 
     // ── AI folders (virtual — query search index) ─────────────────────
     try {
-      const allEntries = await getAllEntries();
-      // Group by ai_folder_id, sort by createdAt desc
+      const allEntries = await getAllEntries(userId);
       const byAi: Record<string, typeof allEntries> = {};
       for (const e of allEntries) {
         (byAi[e.ai_folder_id] ??= []).push(e);

@@ -29,6 +29,7 @@ import { useTheme } from "@/providers/theme-provider";
 import type { Lang } from "@/lib/i18n";
 import type { FileItem } from "@/types/file";
 import type { FolderItem } from "@/types/folder";
+import { apiFetch } from "@/lib/api-client";
 
 interface ProfileTabProps {
   displayName?: string;
@@ -67,7 +68,18 @@ export function ProfileTab({ displayName, pictureUrl, files, folders, onDataRese
 
     setFormatState("running");
     try {
-      const res  = await fetch("/api/admin/format", { method: "POST" });
+      // Format requires the server-side ADMIN_TOKEN. We don't bake it into
+      // the bundle — prompt the operator at click time so the secret stays
+      // out of NEXT_PUBLIC_*.
+      const adminToken = window.prompt("Enter ADMIN_TOKEN to confirm wipe:") ?? "";
+      if (!adminToken) {
+        setFormatState("idle");
+        return;
+      }
+      const res  = await apiFetch("/api/admin/format", {
+        method: "POST",
+        headers: { "x-admin-token": adminToken },
+      });
       const data = await res.json() as { ok?: boolean; deleted?: number; error?: string };
       if (!data.ok) throw new Error(data.error ?? "Format failed");
       setFormatDeleted(data.deleted ?? 0);

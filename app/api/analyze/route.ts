@@ -1,20 +1,43 @@
 import { HeadObjectCommand } from "@aws-sdk/client-s3";
 import { analyzeFile } from "@/lib/analyzer";
 import { mapToAiFolder } from "@/lib/ai-folders";
-import { renameS3Object, setS3ObjectTags, mimeFromFilename, s3, BUCKET } from "@/lib/s3";
+import {
+  renameS3Object,
+  setS3ObjectTags,
+  mimeFromFilename,
+  isUserOwnedKey,
+  s3,
+  BUCKET,
+} from "@/lib/s3";
 import { upsertEntry } from "@/lib/search-index";
+import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 
-/** Extract user folder id from S3 key, e.g. "folders/{uuid}/file.pdf" → uuid; else null */
-function extractUserFolderId(key: string): string | null {
-  const m = key.match(/^folders\/([^/]+)\//);
+/**
+ * Extract user folder id from a per-user key.
+ *   `users/{userId}/folders/{folderId}/file.pdf` → folderId
+ *   `users/{userId}/uploads/file.pdf`            → null
+ */
+function extractUserFolderId(key: string, userId: string): string | null {
+  const m = key.match(new RegExp(`^users/${userId}/folders/([^/]+)/`));
   return m?.[1] ?? null;
 }
 
 export async function POST(req: Request) {
+  let userId: string;
   try {
-    const { key } = (await req.json()) as { key?: string };
-    if (!key || typeof key !== "string") {
-      return Response.json({ error: "Missing required field: key" }, { status: 400 });
+    userId = await requireUserId(req);
+  } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
+    throw err;
+  }
+
+  try {
+    const { key } = (await req.json()) as { key?: unknown };
+    if (!isUserOwnedKey(key, userId)) {
+      return Response.json(
+        { error: "Invalid key — must belong to the authenticated user" },
+        { status: 400 }
+      );
     }
 
     // 1. Analyze
@@ -50,7 +73,7 @@ export async function POST(req: Request) {
     try {
       const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: newKey }));
       const filename = newKey.split("/").pop() ?? newKey;
-      await upsertEntry({
+      await upsertEntry(userId, {
         key:            newKey,
         filename,
         category:       analysis.category,
@@ -60,7 +83,7 @@ export async function POST(req: Request) {
         date:           analysis.date,
         keywords:       analysis.keywords,
         ai_folder_id:   aiFolderId,
-        user_folder_id: extractUserFolderId(newKey),
+        user_folder_id: extractUserFolderId(newKey, userId),
         size:           head.ContentLength ?? 0,
         mimeType:       head.ContentType ?? mimeFromFilename(filename),
         createdAt:      head.LastModified?.toISOString() ?? new Date().toISOString(),

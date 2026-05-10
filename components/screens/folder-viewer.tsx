@@ -16,6 +16,7 @@ import { formatBytes, getFileIcon } from "@/lib/utils";
 import { useLanguage } from "@/providers/language-provider";
 import type { FolderItem } from "@/types/folder";
 import type { FileItem } from "@/types/file";
+import { apiFetch } from "@/lib/api-client";
 
 type ViewMode  = "list" | "grid";
 type BatchOp   = "delete" | "move" | "download" | null;
@@ -163,7 +164,7 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
     setBatchError(null);
     try {
       const keys = Array.from(selectedIds);
-      const res  = await fetch("/api/files/batch", {
+      const res  = await apiFetch("/api/files/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "delete", keys }),
@@ -185,7 +186,7 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
     setBatchError(null);
     try {
       const keys = Array.from(selectedIds);
-      const res  = await fetch("/api/files/batch", {
+      const res  = await apiFetch("/api/files/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "move", keys, targetFolderId }),

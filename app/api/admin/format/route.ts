@@ -17,7 +17,9 @@ import {
 } from "@aws-sdk/client-s3";
 import { s3, BUCKET } from "@/lib/s3";
 
-const PREFIXES_TO_WIPE = ["uploads/", "folders/", "folder-meta/"];
+// Wipe both the new per-user namespace AND the legacy flat prefixes so a
+// one-time format also cleans up any pre-C1-migration data lying around.
+const PREFIXES_TO_WIPE = ["users/", "uploads/", "folders/", "folder-meta/"];
 const STANDALONE_KEYS  = ["_search-index.json"];
 
 async function listAllKeys(prefix: string): Promise<ObjectIdentifier[]> {

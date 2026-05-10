@@ -9,6 +9,7 @@ import {
   type ScoredEntry,
 } from "@/lib/search-index";
 import type { FileItem } from "@/types/file";
+import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 
 export interface SearchResultItem extends FileItem {
   score: number;
@@ -27,6 +28,14 @@ function asSort(s: string | null): SortMode {
 }
 
 export async function GET(req: Request) {
+  let userId: string;
+  try {
+    userId = await requireUserId(req);
+  } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
+    throw err;
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const q      = (searchParams.get("q") ?? "").trim();
@@ -35,11 +44,11 @@ export async function GET(req: Request) {
 
     // Empty query + no active filter → return empty (UI shows recent/suggestions instead)
     if (!q && filter === "all") {
-      const counts = await countByFilter();
+      const counts = await countByFilter(userId);
       return Response.json({ files: [], query: "", counts });
     }
 
-    const entries = await searchScored(q, { filter, sort });
+    const entries = await searchScored(userId, q, { filter, sort });
 
     const files: SearchResultItem[] = await Promise.all(
       entries.map(async (e: ScoredEntry) => {
@@ -55,7 +64,7 @@ export async function GET(req: Request) {
           mimeType:  e.mimeType,
           url,
           createdAt: e.createdAt,
-          userId:    "unknown",
+          userId,
           score:     e.score,
           matchedIn: e.matchedIn,
           category:  e.category,
@@ -63,7 +72,7 @@ export async function GET(req: Request) {
       })
     );
 
-    const counts = await countByFilter();
+    const counts = await countByFilter(userId);
 
     return Response.json({
       files,

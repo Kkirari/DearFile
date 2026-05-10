@@ -24,6 +24,7 @@ import { formatBytes, getFileIcon } from "@/lib/utils";
 import type { FileItem } from "@/types/file";
 import type { FolderItem } from "@/types/folder";
 import type { FileType } from "@/lib/mock-data";
+import { apiFetch } from "@/lib/api-client";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -147,7 +148,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
     }
     let cancelled = false;
     const t = setTimeout(() => {
-      fetch(`/api/search/suggest?q=${encodeURIComponent(query.trim())}`)
+      apiFetch(`/api/search/suggest?q=${encodeURIComponent(query.trim())}`)
         .then((r) => r.json())
         .then((data: { suggestions?: string[] }) => {
           if (!cancelled) setSuggestions(data.suggestions ?? []);
@@ -164,7 +165,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
       setResults([]);
       setViewState("idle");
       // Still fetch counts so chips have badges
-      fetch("/api/search?q=").then((r) => r.json())
+      apiFetch("/api/search?q=").then((r) => r.json())
         .then((d: { counts?: Record<FilterMode, number> }) => {
           if (d.counts) setCounts(d.counts);
         }).catch(() => {});
@@ -178,7 +179,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
       filter,
       sort,
     });
-    fetch(`/api/search?${params}`)
+    apiFetch(`/api/search?${params}`)
       .then((r) => r.json())
       .then((data: { files?: SearchFile[]; counts?: Record<FilterMode, number> }) => {
         if (cancelled) return;

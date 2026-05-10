@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { apiFetch } from "@/lib/api-client";
 
 export interface FolderPreviewItem {
   url: string;
@@ -26,7 +27,7 @@ export function useFolderPreviews(refreshKey: number | string = 0) {
   const fetchPreviews = useCallback(async () => {
     try {
       setLoading(true);
-      const res  = await fetch("/api/folders/previews");
+      const res  = await apiFetch("/api/folders/previews");
       const data = await res.json() as { previews?: PreviewsMap };
       setPreviews(data.previews ?? {});
     } catch (err) {

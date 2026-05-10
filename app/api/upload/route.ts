@@ -1,9 +1,15 @@
 import { PutObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { s3, BUCKET, isSafeFolderId } from "@/lib/s3";
+import {
+  s3,
+  BUCKET,
+  isSafeFolderId,
+  folderMetaExists,
+  userUploadsPrefix,
+  userFolderPrefix,
+} from "@/lib/s3";
+import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 
-// Extensions the app actually understands. Everything else is rejected at
-// presign-time so a caller can't drop arbitrary executables into the bucket.
 const ALLOWED_EXTENSIONS = new Set([
   "pdf",  "txt",
   "jpg",  "jpeg", "png", "gif", "webp", "heic",
@@ -13,8 +19,6 @@ const ALLOWED_EXTENSIONS = new Set([
 ]);
 
 const MAX_FILENAME_LEN = 200;
-// Loose MIME-type sanity check — actual content-type is not enforceable on a
-// presigned PUT, but we at least block weird header injections.
 const MIME_RE = /^[a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+$/;
 
 function isValidFileName(name: unknown): name is string {
@@ -26,6 +30,14 @@ function isValidFileName(name: unknown): name is string {
 }
 
 export async function POST(req: Request) {
+  let userId: string;
+  try {
+    userId = await requireUserId(req);
+  } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
+    throw err;
+  }
+
   try {
     const { fileName, fileType, folderId } = await req.json() as {
       fileName?: unknown;
@@ -50,9 +62,13 @@ export async function POST(req: Request) {
 
     const safeFolderId = typeof folderId === "string" && folderId.length > 0 ? folderId : null;
 
+    if (safeFolderId && !(await folderMetaExists(userId, safeFolderId))) {
+      return Response.json({ error: "Target folder does not exist" }, { status: 404 });
+    }
+
     const key = safeFolderId
-      ? `folders/${safeFolderId}/${Date.now()}-${fileName}`
-      : `uploads/${Date.now()}-${fileName}`;
+      ? `${userFolderPrefix(userId, safeFolderId)}${Date.now()}-${fileName}`
+      : `${userUploadsPrefix(userId)}${Date.now()}-${fileName}`;
 
     const command = new PutObjectCommand({
       Bucket:      BUCKET,
