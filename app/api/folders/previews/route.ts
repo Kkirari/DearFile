@@ -21,20 +21,11 @@ import {
 import { AI_FOLDERS } from "@/lib/ai-folders";
 import { getAllEntries } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
+import { getCached, setCached } from "@/lib/previews-cache";
+import type { PreviewItem, FolderPreview } from "@/types/preview";
 
 const PREVIEW_COUNT = 4;
 const URL_TTL = 3600;
-
-interface PreviewItem {
-  url: string;
-  isImage: boolean;
-  mimeType: string;
-}
-
-interface FolderPreview {
-  total: number;
-  thumbnails: PreviewItem[];
-}
 
 async function listFolderPreviews(prefix: string): Promise<{ items: { Key: string; Size?: number }[]; total: number }> {
   const res = await s3.send(new ListObjectsV2Command({
@@ -71,6 +62,13 @@ export async function GET(req: Request) {
   } catch (err) {
     if (err instanceof AuthError) return authErrorResponse(err);
     throw err;
+  }
+
+  // Fast path — serve from in-process cache when warm. Mutating routes
+  // call invalidatePreviews so the cache stays fresh on the happy path.
+  const cached = getCached(userId);
+  if (cached) {
+    return Response.json({ previews: cached });
   }
 
   try {
@@ -121,6 +119,7 @@ export async function GET(req: Request) {
       console.warn("[folder previews] AI folder fetch failed:", err);
     }
 
+    setCached(userId, previews);
     return Response.json({ previews });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

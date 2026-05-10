@@ -11,6 +11,7 @@ import {
 import { isAiFolderId } from "@/lib/ai-folders";
 import { renameEntryKey } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
+import { invalidatePreviews } from "@/lib/previews-cache";
 
 export async function POST(req: Request) {
   let userId: string;
@@ -75,6 +76,7 @@ export async function POST(req: Request) {
       console.warn("[move] search index update failed (non-fatal):", idxErr);
     }
 
+    invalidatePreviews(userId);
     return Response.json({ ok: true, newKey });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
