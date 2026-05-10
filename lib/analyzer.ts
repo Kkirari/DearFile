@@ -214,8 +214,15 @@ async function analyzeImage(buffer: Buffer, ext: string): Promise<FileAnalysis> 
     })) as Record<string, unknown> | undefined;
 
     if (exif) {
-      if (exif.DateTimeOriginal instanceof Date) {
-        exifDate = formatDate(exif.DateTimeOriginal);
+      // Some cameras hand back a Date instance; others return an ISO/EXIF string.
+      const dto = exif.DateTimeOriginal;
+      if (dto instanceof Date && !isNaN(dto.getTime())) {
+        exifDate = formatDate(dto);
+      } else if (typeof dto === "string" && dto.trim().length > 0) {
+        // EXIF format is "YYYY:MM:DD HH:MM:SS" — Date() doesn't parse colons in date part
+        const normalized = dto.replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
+        const parsed = new Date(normalized);
+        if (!isNaN(parsed.getTime())) exifDate = formatDate(parsed);
       }
       description = String(exif.ImageDescription ?? exif.UserComment ?? "").trim();
     }
@@ -286,15 +293,17 @@ async function analyzePdf(buffer: Buffer): Promise<FileAnalysis> {
 
   let date: string | null = null;
   if (rawDate) {
-    try {
-      // PDF date: D:YYYYMMDDHHmmSSZ or D:YYYYMMDD
-      const clean = String(rawDate).replace(/^D:/, "");
-      const year = clean.slice(0, 4);
-      const month = clean.slice(4, 6);
-      const day = clean.slice(6, 8);
-      if (year && month && day) date = formatDate(new Date(`${year}-${month}-${day}`));
-    } catch {
-      // ignore
+    // PDF date: D:YYYYMMDDHHmmSSZ or D:YYYYMMDD — build the DD-M-YY string
+    // directly so we don't lose a day to UTC→local conversion.
+    const clean = String(rawDate).replace(/^D:/, "");
+    const year  = clean.slice(0, 4);
+    const month = clean.slice(4, 6);
+    const day   = clean.slice(6, 8);
+    if (/^\d{4}$/.test(year) && /^\d{2}$/.test(month) && /^\d{2}$/.test(day)) {
+      const dd = day;
+      const m  = String(parseInt(month, 10)); // strip leading zero
+      const yy = year.slice(-2);
+      date = `${dd}-${m}-${yy}`;
     }
   }
 
@@ -327,11 +336,7 @@ async function analyzeDocx(buffer: Buffer): Promise<FileAnalysis> {
   const zip = await JSZip.loadAsync(buffer);
 
   const coreXml = (await zip.file("docProps/core.xml")?.async("string")) ?? "";
-  const title =
-    extractXmlTag(coreXml, "dc:title") ||
-    extractXmlTag(coreXml, "cp:lastModifiedBy") // last resort
-      .replace(/.*/, "") || // intentionally blank — only use real title fields
-    "";
+  const title = extractXmlTag(coreXml, "dc:title");
   const description =
     extractXmlTag(coreXml, "dc:description") || extractXmlTag(coreXml, "dc:subject");
   const created = extractXmlTag(coreXml, "dcterms:created");

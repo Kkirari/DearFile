@@ -8,7 +8,7 @@ import {
   DeleteObjectCommand,
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
-import { s3, BUCKET, isUserOwnedKey, isSafeFolderId } from "@/lib/s3";
+import { s3, BUCKET, isUserOwnedKey, isSafeFolderId, folderMetaExists } from "@/lib/s3";
 import { isAiFolderId } from "@/lib/ai-folders";
 import { removeEntry, renameEntryKey } from "@/lib/search-index";
 
@@ -77,6 +77,10 @@ export async function POST(req: Request) {
           { error: "AI folders are auto-organized and cannot be used as a move destination." },
           { status: 400 }
         );
+      }
+
+      if (target && !(await folderMetaExists(target))) {
+        return Response.json({ error: "Target folder does not exist" }, { status: 404 });
       }
 
       let movedCount = 0;

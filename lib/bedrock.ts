@@ -34,6 +34,8 @@ export async function invokeHaiku(
   });
 
   const block = response.content[0];
-  if (block.type !== "text") throw new Error("Unexpected response type from Claude");
+  if (!block || block.type !== "text") {
+    throw new Error("Unexpected or empty response from Claude");
+  }
   return block.text;
 }
