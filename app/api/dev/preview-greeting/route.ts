@@ -1,20 +1,22 @@
 /**
- * Dev-only preview endpoint for the LINE welcome carousel.
+ * Dev-only preview endpoint for the LINE Flex bubbles.
  *
- * Returns the `contents` object of the Flex message (carousel of bubbles),
- * ready to paste into https://developers.line.biz/flex-simulator/playground/
+ * Returns the `contents` object of a Flex message, ready to paste into
+ *   https://developers.line.biz/flex-simulator/playground/
  * to render the design without deploying.
  *
  * Gated on NODE_ENV — 404 in production so it can't leak.
  *
  * Usage:
  *   npm run dev
- *   open http://localhost:8000/api/dev/preview-greeting
+ *   open http://localhost:8000/api/dev/preview-greeting          (welcome)
+ *   open http://localhost:8000/api/dev/preview-greeting?b=success
+ *   open http://localhost:8000/api/dev/preview-greeting?b=help
  */
 
-import { welcomeBubble } from "@/lib/line";
+import { helpBubble, uploadSuccessBubble, welcomeBubble } from "@/lib/line";
 
-export async function GET() {
+export async function GET(req: Request) {
   if (process.env.NODE_ENV === "production") {
     return new Response("Not found", { status: 404 });
   }
@@ -22,9 +24,21 @@ export async function GET() {
   const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
   const liffUrl = liffId ? `https://liff.line.me/${liffId}` : "https://line.me";
 
-  const message = welcomeBubble(liffUrl);
+  const which = new URL(req.url).searchParams.get("b") ?? "welcome";
 
-  // The Flex Simulator wants the `contents` (carousel/bubble), not the wrapper.
+  const message =
+    which === "success"
+      ? uploadSuccessBubble({
+          filename:   "receipt_starbucks_18-5-26.pdf",
+          folderName: "🧾 Receipts",
+          liffUrl,
+          detail:     "Coffee receipt — Starbucks, 245 THB",
+          analyzed:   true,
+        })
+      : which === "help"
+      ? helpBubble(liffUrl)
+      : welcomeBubble(liffUrl);
+
   return Response.json(message.contents, {
     headers: { "Cache-Control": "no-store" },
   });

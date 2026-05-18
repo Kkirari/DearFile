@@ -143,9 +143,19 @@ const IMAGE_ORIGIN =
   process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ??
   "https://dear-file.kkiss.site";
 
-const BRAND_GREEN = "#06C755";
-const TEXT_DARK = "#1F2937";
-const TEXT_MUTED = "#6B7280";
+// DearFile palette — keep these in sync with app/globals.css so chat bubbles
+// feel like the same product as the LIFF web app.
+//   --color-background  #f4f3ee  warm cream page bg
+//   --color-card        #fbfaf6  warmer near-white surface
+//   --color-foreground  #4a4036  warm dark brown text
+//   accent              #9b869c  dusty mauve (buttons / focus)
+//   muted               #b0a396  taupe
+//   border              #e0d8cc  light beige rule
+const BRAND_MAUVE     = "#9b869c";
+const CARD_CREAM      = "#fbfaf6";
+const TEXT_DARK_WARM  = "#4a4036";
+const TEXT_TAUPE      = "#b0a396";
+const BORDER_BEIGE    = "#e0d8cc";
 
 function imageBubble(imageUrl: string, label: string, linkUrl: string) {
   return {
@@ -206,19 +216,40 @@ export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
     contents: {
       type: "bubble",
       size: "kilo",
+      styles: {
+        header: { backgroundColor: BRAND_MAUVE },
+        body:   { backgroundColor: CARD_CREAM },
+        footer: { backgroundColor: CARD_CREAM },
+      },
       header: {
         type: "box",
         layout: "vertical",
-        backgroundColor: BRAND_GREEN,
-        paddingAll: "16px",
-        spacing: "sm",
+        paddingAll: "20px",
+        paddingBottom: "16px",
+        spacing: "xs",
         contents: [
           {
-            type: "text",
-            text: `✓ ${statusLabel}`,
-            weight: "bold",
-            color: "#FFFFFF",
-            size: "xs",
+            type: "box",
+            layout: "baseline",
+            spacing: "sm",
+            contents: [
+              {
+                type: "text",
+                text: "✓",
+                color: "#FFFFFF",
+                weight: "bold",
+                size: "md",
+                flex: 0,
+              },
+              {
+                type: "text",
+                text: statusLabel,
+                color: "#FFFFFF",
+                weight: "bold",
+                size: "xs",
+                flex: 0,
+              },
+            ],
           },
           {
             type: "text",
@@ -232,7 +263,7 @@ export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
       body: {
         type: "box",
         layout: "vertical",
-        paddingAll: "16px",
+        paddingAll: "20px",
         spacing: "md",
         contents: [
           {
@@ -240,7 +271,7 @@ export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
             text: opts.filename,
             weight: "bold",
             size: "md",
-            color: TEXT_DARK,
+            color: TEXT_DARK_WARM,
             wrap: true,
           },
           ...(opts.detail
@@ -249,23 +280,29 @@ export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
                   type: "text",
                   text: opts.detail,
                   size: "xs",
-                  color: TEXT_MUTED,
+                  color: TEXT_TAUPE,
                   wrap: true,
                 },
               ]
             : []),
           {
+            type: "separator",
+            margin: "md",
+            color: BORDER_BEIGE,
+          },
+          {
             type: "box",
             layout: "baseline",
             spacing: "sm",
-            margin: "sm",
+            margin: "md",
             contents: [
               { type: "text", text: "📁", flex: 0, size: "sm" },
               {
                 type: "text",
                 text: opts.folderName,
                 size: "sm",
-                color: TEXT_MUTED,
+                color: TEXT_TAUPE,
+                weight: "bold",
                 flex: 0,
               },
             ],
@@ -275,12 +312,13 @@ export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
       footer: {
         type: "box",
         layout: "vertical",
-        paddingAll: "12px",
+        paddingAll: "16px",
+        paddingTop: "0px",
         contents: [
           {
             type: "button",
             style: "primary",
-            color: BRAND_GREEN,
+            color: BRAND_MAUVE,
             height: "sm",
             action: {
               type: "uri",
@@ -304,58 +342,105 @@ export function helpBubble(liffUrl: string): LineFlexMessage {
     contents: {
       type: "bubble",
       size: "kilo",
+      styles: {
+        header: { backgroundColor: BRAND_MAUVE },
+        body:   { backgroundColor: CARD_CREAM },
+        footer: { backgroundColor: CARD_CREAM },
+      },
       header: {
         type: "box",
         layout: "vertical",
-        backgroundColor: BRAND_GREEN,
-        paddingAll: "16px",
+        paddingAll: "20px",
+        paddingBottom: "16px",
+        spacing: "xs",
         contents: [
           {
             type: "text",
             text: "DearFile",
             weight: "bold",
             color: "#FFFFFF",
-            size: "lg",
+            size: "xl",
           },
           {
             type: "text",
             text: "ส่งไฟล์มาในแชตได้เลย",
             color: "#FFFFFF",
             size: "sm",
-            margin: "sm",
           },
         ],
       },
       body: {
         type: "box",
         layout: "vertical",
-        paddingAll: "16px",
-        spacing: "sm",
+        paddingAll: "20px",
+        spacing: "md",
         contents: [
           {
-            type: "text",
-            text: "📷  ส่งรูป / Send a photo",
-            size: "sm",
-            color: TEXT_DARK,
+            type: "box",
+            layout: "baseline",
+            spacing: "md",
+            contents: [
+              { type: "text", text: "📷", flex: 0, size: "md" },
+              {
+                type: "text",
+                text: "ส่งรูป / Send a photo",
+                size: "sm",
+                color: TEXT_DARK_WARM,
+                weight: "bold",
+                flex: 0,
+              },
+            ],
           },
           {
-            type: "text",
-            text: "📄  ส่งเอกสาร / Send a document",
-            size: "sm",
-            color: TEXT_DARK,
+            type: "box",
+            layout: "baseline",
+            spacing: "md",
+            contents: [
+              { type: "text", text: "📄", flex: 0, size: "md" },
+              {
+                type: "text",
+                text: "ส่งเอกสาร / Send a document",
+                size: "sm",
+                color: TEXT_DARK_WARM,
+                weight: "bold",
+                flex: 0,
+              },
+            ],
           },
           {
-            type: "text",
-            text: "🎬  ส่งวิดีโอ / Send a video",
-            size: "sm",
-            color: TEXT_DARK,
+            type: "box",
+            layout: "baseline",
+            spacing: "md",
+            contents: [
+              { type: "text", text: "🎬", flex: 0, size: "md" },
+              {
+                type: "text",
+                text: "ส่งวิดีโอ / Send a video",
+                size: "sm",
+                color: TEXT_DARK_WARM,
+                weight: "bold",
+                flex: 0,
+              },
+            ],
+          },
+          {
+            type: "separator",
+            margin: "md",
+            color: BORDER_BEIGE,
           },
           {
             type: "text",
             text: "AI จะตั้งชื่อและจัดเก็บให้อัตโนมัติ",
             size: "xs",
-            color: TEXT_MUTED,
-            margin: "md",
+            color: TEXT_TAUPE,
+            margin: "sm",
+            wrap: true,
+          },
+          {
+            type: "text",
+            text: "AI auto-names and organizes everything",
+            size: "xs",
+            color: TEXT_TAUPE,
             wrap: true,
           },
         ],
@@ -363,12 +448,13 @@ export function helpBubble(liffUrl: string): LineFlexMessage {
       footer: {
         type: "box",
         layout: "vertical",
-        paddingAll: "12px",
+        paddingAll: "16px",
+        paddingTop: "0px",
         contents: [
           {
             type: "button",
             style: "primary",
-            color: BRAND_GREEN,
+            color: BRAND_MAUVE,
             height: "sm",
             action: {
               type: "uri",
