@@ -1,6 +1,6 @@
 /**
- * LINE Messaging API helpers — webhook signature verification, reply, and
- * Flex bubble factories for the OA bot.
+ * LINE Messaging API helpers — webhook signature verification, content
+ * download, reply/push, and Flex bubble factories for the OA bot.
  *
  * Env:
  *   LINE_CHANNEL_SECRET        — used to verify x-line-signature
@@ -13,6 +13,10 @@
 import crypto from "crypto";
 
 const LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply";
+const LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push";
+// Note: media bytes live on the api-DATA host, not api.line.me.
+const LINE_CONTENT_URL = (messageId: string) =>
+  `https://api-data.line.me/v2/bot/message/${messageId}/content`;
 
 export interface LineTextMessage {
   type: "text";
@@ -52,18 +56,21 @@ export function verifyLineSignature(rawBody: string, signature: string | null): 
   }
 }
 
+function accessToken(): string {
+  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  if (!token) throw new Error("LINE_CHANNEL_ACCESS_TOKEN is not set");
+  return token;
+}
+
 export async function replyMessage(
   replyToken: string,
   messages: LineMessage[],
 ): Promise<void> {
-  const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  if (!token) throw new Error("LINE_CHANNEL_ACCESS_TOKEN is not set");
-
   const res = await fetch(LINE_REPLY_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${accessToken()}`,
     },
     body: JSON.stringify({ replyToken, messages }),
   });
@@ -72,6 +79,53 @@ export async function replyMessage(
     const body = await res.text();
     throw new Error(`LINE reply failed (${res.status}): ${body}`);
   }
+}
+
+/**
+ * Push a message to a user without a replyToken (charged against the LINE
+ * push-message quota — use replyMessage when a token is available).
+ */
+export async function pushMessage(to: string, messages: LineMessage[]): Promise<void> {
+  const res = await fetch(LINE_PUSH_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${accessToken()}`,
+    },
+    body: JSON.stringify({ to, messages }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`LINE push failed (${res.status}): ${body}`);
+  }
+}
+
+/**
+ * Download the binary content of a user-uploaded image/video/audio/file
+ * message from LINE. Buffers the entire response — LINE caps content at
+ * ~300MB but we should fail gracefully on anything close to function memory.
+ */
+export interface LineContent {
+  buffer: Buffer;
+  contentType: string;
+}
+
+export async function fetchLineContent(messageId: string): Promise<LineContent> {
+  const res = await fetch(LINE_CONTENT_URL(messageId), {
+    headers: { Authorization: `Bearer ${accessToken()}` },
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`LINE content fetch failed (${res.status}): ${body}`);
+  }
+
+  const arrayBuffer = await res.arrayBuffer();
+  return {
+    buffer: Buffer.from(arrayBuffer),
+    contentType: res.headers.get("content-type") ?? "application/octet-stream",
+  };
 }
 
 /**
@@ -88,6 +142,10 @@ export async function replyMessage(
 const IMAGE_ORIGIN =
   process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ??
   "https://dear-file.kkiss.site";
+
+const BRAND_GREEN = "#06C755";
+const TEXT_DARK = "#1F2937";
+const TEXT_MUTED = "#6B7280";
 
 function imageBubble(imageUrl: string, label: string, linkUrl: string) {
   return {
@@ -123,6 +181,203 @@ export function welcomeBubble(liffUrl: string): LineFlexMessage {
       contents: [1, 2, 3, 4].map((n) =>
         imageBubble(`${IMAGE_ORIGIN}/liff/${n}.png`, `action ${n}`, liffUrl),
       ),
+    },
+  };
+}
+
+/**
+ * Confirmation bubble shown after a chat-uploaded file lands in S3 (and,
+ * when possible, gets renamed + categorized by the analyzer).
+ */
+export interface UploadSuccessOpts {
+  filename: string;
+  folderName: string;
+  liffUrl: string;
+  detail?: string;
+  analyzed: boolean;
+}
+
+export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
+  const statusLabel = opts.analyzed ? "AI ORGANIZED" : "SAVED";
+
+  return {
+    type: "flex",
+    altText: `บันทึก ${opts.filename} แล้ว / Saved ${opts.filename}`,
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: BRAND_GREEN,
+        paddingAll: "16px",
+        spacing: "sm",
+        contents: [
+          {
+            type: "text",
+            text: `✓ ${statusLabel}`,
+            weight: "bold",
+            color: "#FFFFFF",
+            size: "xs",
+          },
+          {
+            type: "text",
+            text: "DearFile",
+            weight: "bold",
+            color: "#FFFFFF",
+            size: "xl",
+          },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        spacing: "md",
+        contents: [
+          {
+            type: "text",
+            text: opts.filename,
+            weight: "bold",
+            size: "md",
+            color: TEXT_DARK,
+            wrap: true,
+          },
+          ...(opts.detail
+            ? [
+                {
+                  type: "text",
+                  text: opts.detail,
+                  size: "xs",
+                  color: TEXT_MUTED,
+                  wrap: true,
+                },
+              ]
+            : []),
+          {
+            type: "box",
+            layout: "baseline",
+            spacing: "sm",
+            margin: "sm",
+            contents: [
+              { type: "text", text: "📁", flex: 0, size: "sm" },
+              {
+                type: "text",
+                text: opts.folderName,
+                size: "sm",
+                color: TEXT_MUTED,
+                flex: 0,
+              },
+            ],
+          },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "12px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: BRAND_GREEN,
+            height: "sm",
+            action: {
+              type: "uri",
+              label: "เปิด DearFile / Open",
+              uri: opts.liffUrl,
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+/**
+ * Friendly help bubble shown when the user texts the OA (vs sending media).
+ */
+export function helpBubble(liffUrl: string): LineFlexMessage {
+  return {
+    type: "flex",
+    altText: "ส่งไฟล์ให้ DearFile / Send a file to DearFile",
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      header: {
+        type: "box",
+        layout: "vertical",
+        backgroundColor: BRAND_GREEN,
+        paddingAll: "16px",
+        contents: [
+          {
+            type: "text",
+            text: "DearFile",
+            weight: "bold",
+            color: "#FFFFFF",
+            size: "lg",
+          },
+          {
+            type: "text",
+            text: "ส่งไฟล์มาในแชตได้เลย",
+            color: "#FFFFFF",
+            size: "sm",
+            margin: "sm",
+          },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        spacing: "sm",
+        contents: [
+          {
+            type: "text",
+            text: "📷  ส่งรูป / Send a photo",
+            size: "sm",
+            color: TEXT_DARK,
+          },
+          {
+            type: "text",
+            text: "📄  ส่งเอกสาร / Send a document",
+            size: "sm",
+            color: TEXT_DARK,
+          },
+          {
+            type: "text",
+            text: "🎬  ส่งวิดีโอ / Send a video",
+            size: "sm",
+            color: TEXT_DARK,
+          },
+          {
+            type: "text",
+            text: "AI จะตั้งชื่อและจัดเก็บให้อัตโนมัติ",
+            size: "xs",
+            color: TEXT_MUTED,
+            margin: "md",
+            wrap: true,
+          },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "12px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: BRAND_GREEN,
+            height: "sm",
+            action: {
+              type: "uri",
+              label: "เปิด DearFile / Open",
+              uri: liffUrl,
+            },
+          },
+        ],
+      },
     },
   };
 }
