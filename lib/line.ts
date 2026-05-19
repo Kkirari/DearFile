@@ -102,6 +102,20 @@ export async function pushMessage(to: string, messages: LineMessage[]): Promise<
 }
 
 /**
+ * Fetch a LINE group summary (display name, picture URL). Returns null if
+ * the group isn't accessible — e.g. the bot was kicked between events.
+ */
+export async function fetchGroupSummary(
+  groupId: string,
+): Promise<{ groupId: string; groupName: string; pictureUrl?: string } | null> {
+  const res = await fetch(`https://api.line.me/v2/bot/group/${groupId}/summary`, {
+    headers: { Authorization: `Bearer ${accessToken()}` },
+  });
+  if (!res.ok) return null;
+  return res.json() as Promise<{ groupId: string; groupName: string; pictureUrl?: string }>;
+}
+
+/**
  * Download the binary content of a user-uploaded image/video/audio/file
  * message from LINE. Buffers the entire response — LINE caps content at
  * ~300MB but we should fail gracefully on anything close to function memory.
@@ -198,6 +212,9 @@ export function welcomeBubble(liffUrl: string): LineFlexMessage {
 /**
  * Confirmation bubble shown after a chat-uploaded file lands in S3 (and,
  * when possible, gets renamed + categorized by the analyzer).
+ *
+ * `workspaceName` is set when the file landed in a shared workspace; it
+ * shows above the folder row so members know which shared space it joined.
  */
 export interface UploadSuccessOpts {
   filename: string;
@@ -205,6 +222,7 @@ export interface UploadSuccessOpts {
   liffUrl: string;
   detail?: string;
   analyzed: boolean;
+  workspaceName?: string;
 }
 
 export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
@@ -290,11 +308,32 @@ export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
             margin: "md",
             color: BORDER_BEIGE,
           },
+          ...(opts.workspaceName
+            ? [
+                {
+                  type: "box",
+                  layout: "baseline",
+                  spacing: "sm",
+                  margin: "md",
+                  contents: [
+                    { type: "text", text: "👥", flex: 0, size: "sm" },
+                    {
+                      type: "text",
+                      text: opts.workspaceName,
+                      size: "sm",
+                      color: BRAND_MAUVE,
+                      weight: "bold",
+                      flex: 0,
+                    },
+                  ],
+                },
+              ]
+            : []),
           {
             type: "box",
             layout: "baseline",
             spacing: "sm",
-            margin: "md",
+            margin: opts.workspaceName ? "sm" : "md",
             contents: [
               { type: "text", text: "📁", flex: 0, size: "sm" },
               {
