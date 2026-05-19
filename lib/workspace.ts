@@ -11,17 +11,25 @@
  *   owner  — full CRUD, can invite/remove members, can delete the workspace
  *   member — upload + manage own files + create folders, no delete-others
  *
- * Concurrency: meta + per-user index writes go through small per-key
- * promise chains, same idea as lib/search-index.ts's withIndexLock. This
- * stops two simultaneous webhook events from clobbering each other when
- * adding members. Multi-instance races still exist; a real fix needs
- * ETag-conditional writes or a KV store.
+ * Concurrency model:
+ *   - `_meta.json` writes go through ETag-based optimistic concurrency
+ *     (compare-and-swap via S3 `If-Match`). Stale writes get a 412 and
+ *     retry with backoff.
+ *   - `group-bindings/{groupId}.json` writes use `If-None-Match: "*"`
+ *     atomic claim so two simultaneous webhooks on a fresh group can't
+ *     each create a workspace and clobber each other's binding.
+ *   - In-process `withLock` is kept as a contention reducer — it stops
+ *     same-instance burst traffic from beating up the CAS retry loop.
+ *     Cross-instance races are handled by the S3 conditionals above.
+ *   - The per-user index (`users/{U}/_workspaces.json`) still uses the
+ *     in-process lock only. It's a denormalization for fast listing; can
+ *     lag the workspace meta by a few ms (eventual consistency is fine
+ *     for the LIFF "Shared with me" view).
  */
 
 import {
   GetObjectCommand,
   PutObjectCommand,
-  HeadObjectCommand,
 } from "@aws-sdk/client-s3";
 import crypto from "crypto";
 import {
@@ -59,7 +67,7 @@ export interface UserWorkspaceEntry {
   joinedAt: string;
 }
 
-// ── Locks ─────────────────────────────────────────────────────────────────
+// ── In-process contention reducers ────────────────────────────────────────
 
 const metaLocks = new Map<string, Promise<unknown>>();
 const userIndexLocks = new Map<string, Promise<unknown>>();
@@ -75,6 +83,22 @@ function withLock<T>(
   return next;
 }
 
+// ── S3 conditional-write helpers ──────────────────────────────────────────
+
+/**
+ * AWS S3 returns 412 PreconditionFailed when an `If-Match` or
+ * `If-None-Match` constraint isn't satisfied. The SDK surfaces this as
+ * either `err.name === "PreconditionFailed"` or via the HTTP metadata.
+ */
+function isPreconditionFailed(err: unknown): boolean {
+  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return e.name === "PreconditionFailed" || e.$metadata?.httpStatusCode === 412;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // ── ID generation ─────────────────────────────────────────────────────────
 
 /**
@@ -88,6 +112,16 @@ function newWorkspaceId(): string {
 // ── Meta read/write ───────────────────────────────────────────────────────
 
 export async function loadWorkspaceMeta(workspaceId: string): Promise<WorkspaceMeta | null> {
+  const loaded = await loadWorkspaceMetaWithEtag(workspaceId);
+  return loaded?.meta ?? null;
+}
+
+interface MetaWithEtag {
+  meta: WorkspaceMeta;
+  etag: string;
+}
+
+async function loadWorkspaceMetaWithEtag(workspaceId: string): Promise<MetaWithEtag | null> {
   if (!isSafeWorkspaceId(workspaceId)) return null;
   try {
     const res = await s3.send(new GetObjectCommand({
@@ -96,21 +130,67 @@ export async function loadWorkspaceMeta(workspaceId: string): Promise<WorkspaceM
     }));
     const body = await res.Body?.transformToString();
     if (!body) return null;
-    return JSON.parse(body) as WorkspaceMeta;
+    const meta = JSON.parse(body) as WorkspaceMeta;
+    // S3 wraps the ETag in quotes; strip so we can pass it back verbatim
+    // (the AWS SDK accepts either form on `IfMatch` but consistency helps).
+    const etag = (res.ETag ?? "").replace(/^"|"$/g, "");
+    if (!etag) return null;
+    return { meta, etag };
   } catch (err: unknown) {
     if ((err as { name?: string }).name === "NoSuchKey") return null;
     throw err;
   }
 }
 
-async function saveWorkspaceMeta(meta: WorkspaceMeta): Promise<void> {
-  meta.updatedAt = new Date().toISOString();
-  await s3.send(new PutObjectCommand({
-    Bucket:      BUCKET,
-    Key:         workspaceMetaKey(meta.id),
-    Body:        JSON.stringify(meta),
-    ContentType: "application/json",
-  }));
+/**
+ * Sentinel returned from a `mutateMeta` mutator to indicate "the current
+ * state is already what I want — skip the write entirely". Used so
+ * idempotent ops (e.g. `addMember` when the user is already a member)
+ * don't pay the cost of a no-op PUT.
+ */
+export const META_SKIP = Symbol("workspace.meta.skip");
+
+type Mutator = (meta: WorkspaceMeta) => void | typeof META_SKIP;
+
+const META_MAX_ATTEMPTS = 5;
+
+/**
+ * Compare-and-swap on a workspace's `_meta.json`. Loads → mutates → writes
+ * with `If-Match: <etag>`. Retries with jittered backoff on 412 (concurrent
+ * writer beat us). Throws after META_MAX_ATTEMPTS attempts.
+ *
+ * The mutator is called with the freshly loaded copy each attempt — it
+ * must be idempotent and side-effect-free relative to its first call.
+ */
+async function mutateMeta(
+  workspaceId: string,
+  mutator: Mutator,
+): Promise<WorkspaceMeta> {
+  for (let attempt = 0; attempt < META_MAX_ATTEMPTS; attempt++) {
+    const loaded = await loadWorkspaceMetaWithEtag(workspaceId);
+    if (!loaded) throw new AuthError(404, "Workspace not found");
+
+    const result = mutator(loaded.meta);
+    if (result === META_SKIP) return loaded.meta;
+
+    loaded.meta.updatedAt = new Date().toISOString();
+
+    try {
+      await s3.send(new PutObjectCommand({
+        Bucket:      BUCKET,
+        Key:         workspaceMetaKey(workspaceId),
+        Body:        JSON.stringify(loaded.meta),
+        ContentType: "application/json",
+        IfMatch:     loaded.etag,
+      }));
+      return loaded.meta;
+    } catch (err) {
+      if (!isPreconditionFailed(err)) throw err;
+      // Jittered backoff: 50ms, 100ms, 150ms, 200ms, 250ms (+0-50ms jitter)
+      await sleep(50 * (attempt + 1) + Math.random() * 50);
+    }
+  }
+  throw new Error(`Workspace meta CAS gave up after ${META_MAX_ATTEMPTS} attempts (workspace=${workspaceId})`);
 }
 
 // ── Per-user workspace index ──────────────────────────────────────────────
@@ -179,23 +259,21 @@ export async function createWorkspace(input: CreateWorkspaceInput): Promise<Work
     updatedAt:   now,
   };
 
-  await saveWorkspaceMeta(meta);
+  // Unconditional write — the workspace id is server-generated and unique,
+  // so there's no contention here.
+  await s3.send(new PutObjectCommand({
+    Bucket:      BUCKET,
+    Key:         workspaceMetaKey(meta.id),
+    Body:        JSON.stringify(meta),
+    ContentType: "application/json",
+  }));
+
   await addToUserIndex(input.ownerId, { id, role: "owner", joinedAt: now });
   return meta;
 }
 
-/**
- * Find a workspace by its bound LINE group id. Returns null if none.
- *
- * Implementation note: we scan the owner's user-index for any entry whose
- * meta carries the lineGroupId. That's an O(N) scan but N is small per
- * user. A reverse-index (`group-to-workspace/{groupId}.json`) would scale
- * but isn't worth it for Phase 1.
- *
- * Actually we can't scan "the owner's" index without knowing the owner.
- * Instead we use a tiny reverse-index at `group-bindings/{groupId}.json`
- * holding the workspaceId. Trivial extra file — much cheaper than scanning.
- */
+// ── Group binding (LINE group ↔ workspace id) ────────────────────────────
+
 const groupBindingKey = (lineGroupId: string) => `group-bindings/${lineGroupId}.json`;
 
 export async function findWorkspaceByLineGroup(
@@ -217,37 +295,74 @@ export async function findWorkspaceByLineGroup(
   }
 }
 
-async function setGroupBinding(lineGroupId: string, workspaceId: string): Promise<void> {
-  await s3.send(new PutObjectCommand({
-    Bucket:      BUCKET,
-    Key:         groupBindingKey(lineGroupId),
-    Body:        JSON.stringify({ workspaceId }),
-    ContentType: "application/json",
-  }));
+/**
+ * Atomically claim the binding for a LINE group → workspace id. Returns
+ * true if our claim won; false if a concurrent write got there first.
+ * Uses `If-None-Match: "*"` so two simultaneous webhook events on a fresh
+ * group can't both succeed.
+ */
+async function tryClaimGroupBinding(
+  lineGroupId: string,
+  workspaceId: string,
+): Promise<boolean> {
+  try {
+    await s3.send(new PutObjectCommand({
+      Bucket:       BUCKET,
+      Key:          groupBindingKey(lineGroupId),
+      Body:         JSON.stringify({ workspaceId }),
+      ContentType:  "application/json",
+      IfNoneMatch:  "*",
+    }));
+    return true;
+  } catch (err) {
+    if (isPreconditionFailed(err)) return false;
+    throw err;
+  }
 }
 
 /**
  * Create a workspace bound to a LINE group, or return the existing one if
- * the binding already exists. Idempotent for webhook retries.
+ * one is already bound. Atomic: two simultaneous calls produce one
+ * canonical workspace; the loser of the race leaks a `_meta.json` (and
+ * one user-index entry) but its id never appears in any binding so no
+ * file ever lands in it. Acceptable for Phase 1; a sweep script can
+ * clean orphan workspaces later if rates warrant.
  */
 export async function createGroupWorkspace(opts: {
   lineGroupId: string;
   ownerId: string;
   name?: string;
 }): Promise<WorkspaceMeta> {
+  // Fast path — cheap GET, avoids creating a workspace we'll throw away.
   const existing = await findWorkspaceByLineGroup(opts.lineGroupId);
   if (existing) return existing;
 
-  const meta = await createWorkspace({
+  // Create our candidate workspace, then race to claim the binding.
+  const candidate = await createWorkspace({
     name:        opts.name ?? "Untitled Workspace",
     ownerId:     opts.ownerId,
     lineGroupId: opts.lineGroupId,
   });
-  await setGroupBinding(opts.lineGroupId, meta.id);
-  return meta;
+
+  const won = await tryClaimGroupBinding(opts.lineGroupId, candidate.id);
+  if (won) return candidate;
+
+  // We lost the claim — re-read the canonical workspace and use it.
+  console.warn(
+    `[workspace] lost group-binding race for ${opts.lineGroupId}; ` +
+    `our candidate ${candidate.id} is now orphaned`,
+  );
+  const canonical = await findWorkspaceByLineGroup(opts.lineGroupId);
+  if (canonical) return canonical;
+
+  // Pathological: we lost the claim but the canonical binding now fails
+  // to resolve (deleted between our PUT and our re-read?). Return our
+  // own candidate as a fallback rather than throwing — the user's
+  // upload still has somewhere to land.
+  return candidate;
 }
 
-// ── Member management ─────────────────────────────────────────────────────
+// ── Member management (CAS-backed) ────────────────────────────────────────
 
 export function addMember(
   workspaceId: string,
@@ -255,34 +370,30 @@ export function addMember(
   role: WorkspaceRole = "member",
 ): Promise<WorkspaceMeta> {
   return withLock(metaLocks, workspaceId, async () => {
-    const meta = await loadWorkspaceMeta(workspaceId);
-    if (!meta) throw new AuthError(404, "Workspace not found");
-
-    const existing = meta.members.find((m) => m.userId === userId);
-    if (existing) return meta;
-
-    const now = new Date().toISOString();
-    meta.members.push({ userId, role, joinedAt: now });
-    await saveWorkspaceMeta(meta);
-    await addToUserIndex(userId, { id: workspaceId, role, joinedAt: now });
+    const meta = await mutateMeta(workspaceId, (m) => {
+      if (m.members.some((mem) => mem.userId === userId)) return META_SKIP;
+      m.members.push({ userId, role, joinedAt: new Date().toISOString() });
+    });
+    // Side-channel — runs after the meta commit succeeds. Has its own
+    // lock; can lag the meta by a few ms.
+    const entry = meta.members.find((mem) => mem.userId === userId);
+    if (entry) {
+      await addToUserIndex(userId, { id: workspaceId, role: entry.role, joinedAt: entry.joinedAt });
+    }
     return meta;
   });
 }
 
 export function removeMember(workspaceId: string, userId: string): Promise<WorkspaceMeta> {
   return withLock(metaLocks, workspaceId, async () => {
-    const meta = await loadWorkspaceMeta(workspaceId);
-    if (!meta) throw new AuthError(404, "Workspace not found");
-
-    if (meta.ownerId === userId) {
-      throw new AuthError(400, "Cannot remove the workspace owner");
-    }
-
-    const before = meta.members.length;
-    meta.members = meta.members.filter((m) => m.userId !== userId);
-    if (meta.members.length === before) return meta;
-
-    await saveWorkspaceMeta(meta);
+    const meta = await mutateMeta(workspaceId, (m) => {
+      if (m.ownerId === userId) {
+        throw new AuthError(400, "Cannot remove the workspace owner");
+      }
+      const before = m.members.length;
+      m.members = m.members.filter((mem) => mem.userId !== userId);
+      if (m.members.length === before) return META_SKIP;
+    });
     await removeFromUserIndex(userId, workspaceId);
     return meta;
   });
@@ -290,11 +401,17 @@ export function removeMember(workspaceId: string, userId: string): Promise<Works
 
 export function markOrphaned(workspaceId: string): Promise<WorkspaceMeta | null> {
   return withLock(metaLocks, workspaceId, async () => {
-    const meta = await loadWorkspaceMeta(workspaceId);
-    if (!meta) return null;
-    meta.orphaned = true;
-    await saveWorkspaceMeta(meta);
-    return meta;
+    try {
+      return await mutateMeta(workspaceId, (m) => {
+        if (m.orphaned) return META_SKIP;
+        m.orphaned = true;
+      });
+    } catch (err) {
+      // markOrphaned shouldn't fail loudly if the workspace is already
+      // gone — we're trying to clean up state, not block.
+      if (err instanceof AuthError && err.statusCode === 404) return null;
+      throw err;
+    }
   });
 }
 
