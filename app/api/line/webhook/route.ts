@@ -111,31 +111,72 @@ interface LineWebhookBody {
 // payloads with the same webhookEventId. If we re-process a retry, each run
 // stamps a fresh Date.now() timestamp into the S3 key → duplicate files.
 //
-// We keep an in-process Set of recently-seen webhookEventIds. Fluid Compute
-// reuses warm instances so this catches the typical "retry within a minute"
-// pattern. The Set is bounded so it can't grow forever; a 10-minute TTL
-// covers LINE's documented retry window.
+// Three layers, cheapest first:
+//   1. `deliveryContext.isRedelivery` flag (free, LINE tells us explicitly)
+//   2. In-process Map of recently-seen ids (fast, same-instance only)
+//   3. S3 marker file with If-None-Match (cross-instance, ~50ms per check)
+//
+// Layer 3 is the only one that survives a cold start landing on a fresh
+// Vercel instance. Marker files at `webhook-seen/{eventId}.json` are
+// ~80 bytes each — storage cost is negligible. Add a 1-day lifecycle rule
+// on that prefix if you want tidiness; not required for correctness.
 const SEEN_TTL_MS = 10 * 60 * 1000;
 const SEEN_MAX = 5000;
 const seenEvents = new Map<string, number>();
 
-function shouldSkipEvent(event: LineEvent): boolean {
-  // LINE flags retries explicitly — cheapest path, no state needed.
+function isPreconditionFailed(err: unknown): boolean {
+  const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return e.name === "PreconditionFailed" || e.$metadata?.httpStatusCode === 412;
+}
+
+/**
+ * Atomically claim a webhookEventId by creating an S3 marker file. Returns
+ * false if a marker already exists (i.e. this event was already claimed by
+ * another instance). On unexpected S3 errors we fail OPEN — better to risk
+ * a duplicate than to drop the event entirely.
+ */
+async function claimWebhookEvent(eventId: string): Promise<boolean> {
+  try {
+    await s3.send(new PutObjectCommand({
+      Bucket:       BUCKET,
+      Key:          `webhook-seen/${eventId}.json`,
+      Body:         JSON.stringify({ at: new Date().toISOString() }),
+      ContentType:  "application/json",
+      IfNoneMatch:  "*",
+    }));
+    return true;
+  } catch (err) {
+    if (isPreconditionFailed(err)) return false;
+    console.warn("[line/webhook] dedupe marker write failed, failing open:", err);
+    return true;
+  }
+}
+
+async function shouldSkipEvent(event: LineEvent): Promise<boolean> {
+  // Layer 1 — LINE flags retries explicitly.
   if (event.deliveryContext?.isRedelivery) return true;
 
   const id = event.webhookEventId;
   if (!id) return false;
 
+  // Layer 2 — in-memory check (fast).
   const now = Date.now();
-  // Sweep expired entries opportunistically (cheap, amortized).
   if (seenEvents.size > SEEN_MAX) {
     for (const [k, t] of seenEvents) {
       if (now - t > SEEN_TTL_MS) seenEvents.delete(k);
     }
   }
-
   const seen = seenEvents.get(id);
   if (seen !== undefined && now - seen < SEEN_TTL_MS) return true;
+
+  // Layer 3 — S3 marker (cross-instance).
+  const claimed = await claimWebhookEvent(id);
+  if (!claimed) {
+    // Cache the negative result so this instance doesn't pay the S3 cost
+    // again for the same event during its warm lifetime.
+    seenEvents.set(id, now);
+    return true;
+  }
 
   seenEvents.set(id, now);
   return false;
@@ -552,8 +593,9 @@ export async function POST(req: Request) {
         // Drop retries / duplicates before doing any work. LINE will keep
         // re-delivering the same webhookEventId until it gets a 2xx, and
         // each run would otherwise stamp a fresh timestamp into the S3 key
-        // producing duplicate files.
-        if (shouldSkipEvent(event)) {
+        // producing duplicate files. The check is async because the
+        // bottom layer hits S3 for cross-instance dedupe.
+        if (await shouldSkipEvent(event)) {
           console.log(`[line/webhook] skipping duplicate event ${event.webhookEventId ?? "(no id)"}`);
           return;
         }
