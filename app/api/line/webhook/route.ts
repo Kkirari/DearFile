@@ -95,11 +95,50 @@ interface LineEvent {
   source?: LineEventSource;
   timestamp?: number;
   message?: LineMessageContent;
+  /** LINE-assigned unique id per event delivery. Same on retries. */
+  webhookEventId?: string;
+  deliveryContext?: { isRedelivery?: boolean };
 }
 
 interface LineWebhookBody {
   destination?: string;
   events?: LineEvent[];
+}
+
+// ── Idempotency: webhookEventId dedupe ────────────────────────────────────
+//
+// LINE retries webhook deliveries on timeouts/5xx, sending identical event
+// payloads with the same webhookEventId. If we re-process a retry, each run
+// stamps a fresh Date.now() timestamp into the S3 key → duplicate files.
+//
+// We keep an in-process Set of recently-seen webhookEventIds. Fluid Compute
+// reuses warm instances so this catches the typical "retry within a minute"
+// pattern. The Set is bounded so it can't grow forever; a 10-minute TTL
+// covers LINE's documented retry window.
+const SEEN_TTL_MS = 10 * 60 * 1000;
+const SEEN_MAX = 5000;
+const seenEvents = new Map<string, number>();
+
+function shouldSkipEvent(event: LineEvent): boolean {
+  // LINE flags retries explicitly — cheapest path, no state needed.
+  if (event.deliveryContext?.isRedelivery) return true;
+
+  const id = event.webhookEventId;
+  if (!id) return false;
+
+  const now = Date.now();
+  // Sweep expired entries opportunistically (cheap, amortized).
+  if (seenEvents.size > SEEN_MAX) {
+    for (const [k, t] of seenEvents) {
+      if (now - t > SEEN_TTL_MS) seenEvents.delete(k);
+    }
+  }
+
+  const seen = seenEvents.get(id);
+  if (seen !== undefined && now - seen < SEEN_TTL_MS) return true;
+
+  seenEvents.set(id, now);
+  return false;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────
@@ -510,6 +549,15 @@ export async function POST(req: Request) {
   await Promise.allSettled(
     events.map(async (event) => {
       try {
+        // Drop retries / duplicates before doing any work. LINE will keep
+        // re-delivering the same webhookEventId until it gets a 2xx, and
+        // each run would otherwise stamp a fresh timestamp into the S3 key
+        // producing duplicate files.
+        if (shouldSkipEvent(event)) {
+          console.log(`[line/webhook] skipping duplicate event ${event.webhookEventId ?? "(no id)"}`);
+          return;
+        }
+
         // follow → welcome carousel (DM bot was friended)
         if (event.type === "follow" && event.replyToken) {
           await replyMessage(event.replyToken, [welcomeBubble(url)]);
