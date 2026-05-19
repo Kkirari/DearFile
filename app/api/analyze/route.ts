@@ -6,20 +6,25 @@ import {
   setS3ObjectTags,
   mimeFromFilename,
   isUserOwnedKey,
+  isWorkspaceOwnedKey,
+  isSafeWorkspaceId,
   s3,
   BUCKET,
 } from "@/lib/s3";
-import { upsertEntry } from "@/lib/search-index";
+import { upsertEntry, upsertWorkspaceEntry } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
+import { requireWorkspaceAccess } from "@/lib/workspace";
 import { invalidatePreviews } from "@/lib/previews-cache";
 
 /**
- * Extract user folder id from a per-user key.
- *   `users/{userId}/folders/{folderId}/file.pdf` → folderId
- *   `users/{userId}/uploads/file.pdf`            → null
+ * Extract folder id from a key — works for both per-user and workspace keys.
+ *   users/{userId}/folders/{folderId}/file       → folderId
+ *   workspaces/{workspaceId}/folders/{folderId}/ → folderId
+ *   users/{userId}/uploads/file                  → null
+ *   workspaces/{workspaceId}/inbox/file          → null
  */
-function extractUserFolderId(key: string, userId: string): string | null {
-  const m = key.match(new RegExp(`^users/${userId}/folders/([^/]+)/`));
+function extractFolderId(key: string): string | null {
+  const m = key.match(/^(?:users|workspaces)\/[^/]+\/folders\/([^/]+)\//);
   return m?.[1] ?? null;
 }
 
@@ -33,12 +38,32 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { key } = (await req.json()) as { key?: unknown };
-    if (!isUserOwnedKey(key, userId)) {
-      return Response.json(
-        { error: "Invalid key — must belong to the authenticated user" },
-        { status: 400 }
-      );
+    const { key, workspaceId } = (await req.json()) as {
+      key?: unknown;
+      workspaceId?: unknown;
+    };
+
+    const isWorkspaceCall =
+      workspaceId !== undefined && workspaceId !== null && workspaceId !== "";
+
+    if (isWorkspaceCall) {
+      if (!isSafeWorkspaceId(workspaceId)) {
+        return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
+      }
+      await requireWorkspaceAccess(userId, workspaceId);
+      if (!isWorkspaceOwnedKey(key, workspaceId)) {
+        return Response.json(
+          { error: "Invalid key — must belong to this workspace" },
+          { status: 400 },
+        );
+      }
+    } else {
+      if (!isUserOwnedKey(key, userId)) {
+        return Response.json(
+          { error: "Invalid key — must belong to the authenticated user" },
+          { status: 400 },
+        );
+      }
     }
 
     // 1. Analyze
@@ -65,6 +90,7 @@ export async function POST(req: Request) {
         df_ai_folder_id: aiFolderId,
         df_via:          analysis.via,
         df_analyzed:     "1",
+        ...(isWorkspaceCall ? { df_uploader: userId, df_workspace: workspaceId as string } : {}),
       });
     } catch (tagErr) {
       console.warn("[analyze] tagging failed (non-fatal):", tagErr);
@@ -74,7 +100,7 @@ export async function POST(req: Request) {
     try {
       const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: newKey }));
       const filename = newKey.split("/").pop() ?? newKey;
-      await upsertEntry(userId, {
+      const entry = {
         key:            newKey,
         filename,
         category:       analysis.category,
@@ -84,11 +110,16 @@ export async function POST(req: Request) {
         date:           analysis.date,
         keywords:       analysis.keywords,
         ai_folder_id:   aiFolderId,
-        user_folder_id: extractUserFolderId(newKey, userId),
+        user_folder_id: extractFolderId(newKey),
         size:           head.ContentLength ?? 0,
         mimeType:       head.ContentType ?? mimeFromFilename(filename),
         createdAt:      head.LastModified?.toISOString() ?? new Date().toISOString(),
-      });
+      };
+      if (isWorkspaceCall) {
+        await upsertWorkspaceEntry(workspaceId as string, { ...entry, uploaderId: userId });
+      } else {
+        await upsertEntry(userId, entry);
+      }
     } catch (idxErr) {
       console.warn("[analyze] index update failed (non-fatal):", idxErr);
     }
@@ -96,7 +127,7 @@ export async function POST(req: Request) {
     // The new file is now visible — drop the previews cache so the next
     // /api/folders/previews call recomputes thumbnails for the affected
     // (and AI) folders.
-    invalidatePreviews(userId);
+    if (!isWorkspaceCall) invalidatePreviews(userId);
 
     return Response.json({
       ...analysis,
@@ -105,6 +136,7 @@ export async function POST(req: Request) {
       ai_folder_id:  aiFolderId,
     });
   } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
     const message = err instanceof Error ? err.message : String(err);
     console.error("[POST /api/analyze]", message);
     if (message.startsWith("Unsupported file type")) {

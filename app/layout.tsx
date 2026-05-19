@@ -4,6 +4,7 @@ import { Sarabun } from "next/font/google";
 import { LiffProvider } from "@/providers/liff-provider";
 import { LanguageProvider } from "@/providers/language-provider";
 import { ThemeProvider } from "@/providers/theme-provider";
+import { WorkspaceProvider } from "@/providers/workspace-provider";
 import "./globals.css";
 
 const sarabun = Sarabun({
@@ -44,7 +45,9 @@ export default function RootLayout({
         />
         <ThemeProvider>
           <LanguageProvider>
-            <LiffProvider>{children}</LiffProvider>
+            <LiffProvider>
+              <WorkspaceProvider>{children}</WorkspaceProvider>
+            </LiffProvider>
           </LanguageProvider>
         </ThemeProvider>
       </body>

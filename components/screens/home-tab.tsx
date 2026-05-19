@@ -18,6 +18,7 @@ import { FolderCard } from "@/components/folder-card";
 import { FileDetailSheet } from "@/components/file-detail-sheet";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { FolderViewer } from "@/components/screens/folder-viewer";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useFolderPreviews } from "@/hooks/use-folder-previews";
 import { trackVisit } from "@/lib/folder-prefs";
 import { getFileIcon } from "@/lib/utils";
@@ -135,6 +136,11 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
             {tr.searchPlaceholder}
           </span>
         </button>
+
+        {/* ── WORKSPACE SWITCHER ── (hidden for solo users) */}
+        <div className="mt-4">
+          <WorkspaceSwitcher />
+        </div>
       </div>
 
       {/* ── MY FOLDERS (preview) ── */}
