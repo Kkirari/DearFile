@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import type { FileItem } from "@/types/file";
 import { apiFetch } from "@/lib/api-client";
+import { useWorkspace, withWorkspace } from "@/providers/workspace-provider";
 
 interface UseFilesResult {
   files: FileItem[];
@@ -15,14 +16,16 @@ interface UseFilesResult {
 // folderId: "all"          = all files across every prefix
 // folderId: string         = specific folder
 export function useFiles(folderId?: string | null): UseFilesResult {
+  const { currentWorkspaceId } = useWorkspace();
   const [files, setFiles]     = useState<FileItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState<string | null>(null);
 
-  const url =
+  const baseUrl =
     folderId === "all" ? "/api/files?scope=all" :
     folderId           ? `/api/files?folderId=${folderId}` :
                          "/api/files";
+  const url = withWorkspace(baseUrl, currentWorkspaceId);
 
   const refresh = useCallback(async () => {
     try {

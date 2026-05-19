@@ -5,6 +5,7 @@ import { Upload, X, FolderOpen, Camera, Image as ImageIcon, CheckCircle2 } from 
 import { FolderPickerSheet } from "@/components/folder-picker-sheet";
 import type { FolderItem } from "@/types/folder";
 import { apiFetch } from "@/lib/api-client";
+import { useWorkspace } from "@/providers/workspace-provider";
 
 // SVG ring: r=22 → circumference = 2π×22 ≈ 138.23
 const RING_R = 22;
@@ -48,6 +49,7 @@ function uploadToS3(
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultFolderId }: UploadFabProps) {
+  const { currentWorkspaceId } = useWorkspace();
   const [sheetOpen, setSheetOpen]       = useState(false);
   const [isClosing, setIsClosing]       = useState(false);
   const [uploadState, setUploadState]   = useState<UploadState>("idle");
@@ -109,6 +111,7 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
           fileName: file.name,
           fileType: file.type,
           ...(folderId ? { folderId } : {}),
+          ...(currentWorkspaceId ? { workspaceId: currentWorkspaceId } : {}),
         }),
       });
       if (!res.ok) throw new Error("Could not get upload URL");
@@ -123,7 +126,10 @@ export function UploadFab({ onUploadComplete, onFolderRefresh, folders, defaultF
         await apiFetch("/api/analyze", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key }),
+          body: JSON.stringify({
+            key,
+            ...(currentWorkspaceId ? { workspaceId: currentWorkspaceId } : {}),
+          }),
         });
         // After analyze the search index is updated → refresh folders so
         // AI folder counts reflect the newly categorized file

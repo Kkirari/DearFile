@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { X, FolderPlus } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
+import { useWorkspace } from "@/providers/workspace-provider";
 
 interface CreateFolderSheetProps {
   onClose: () => void;
@@ -10,6 +11,7 @@ interface CreateFolderSheetProps {
 }
 
 export function CreateFolderSheet({ onClose, onCreated }: CreateFolderSheetProps) {
+  const { currentWorkspaceId } = useWorkspace();
   const [isClosing, setIsClosing] = useState(false);
   const [name, setName]           = useState("");
   const [saving, setSaving]       = useState(false);
@@ -34,7 +36,11 @@ export function CreateFolderSheet({ onClose, onCreated }: CreateFolderSheetProps
       const res  = await apiFetch("/api/folders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: trimmed, owner: "user" }),
+        body: JSON.stringify({
+          name: trimmed,
+          owner: "user",
+          ...(currentWorkspaceId ? { workspaceId: currentWorkspaceId } : {}),
+        }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);

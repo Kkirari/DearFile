@@ -9,6 +9,7 @@ import { FolderCard } from "@/components/folder-card";
 import { CreateFolderSheet } from "@/components/create-folder-sheet";
 import { FolderActionsSheet } from "@/components/folder-actions-sheet";
 import { FolderViewer } from "@/components/screens/folder-viewer";
+import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useLanguage } from "@/providers/language-provider";
 import { useFolderPreviews } from "@/hooks/use-folder-previews";
 import {
@@ -226,6 +227,11 @@ export function FoldersTab({ folders, loading, unsortedCount, onRefresh }: Folde
               </div>
             </>
           )}
+        </div>
+
+        {/* ── WORKSPACE SWITCHER ── (hidden for solo users) */}
+        <div className="mt-4">
+          <WorkspaceSwitcher />
         </div>
       </div>
 
