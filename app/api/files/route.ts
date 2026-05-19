@@ -5,30 +5,61 @@ import {
   BUCKET,
   mimeFromFilename,
   isUserOwnedKey,
+  isWorkspaceOwnedKey,
   isSafeFolderId,
+  isSafeWorkspaceId,
   userUploadsPrefix,
   userFolderPrefix,
+  workspaceInboxPrefix,
+  workspaceFolderPrefix,
 } from "@/lib/s3";
 import type { FileItem } from "@/types/file";
 import { isAiFolderId } from "@/lib/ai-folders";
-import { entriesByAiFolder, removeEntry } from "@/lib/search-index";
+import {
+  entriesByAiFolder,
+  workspaceEntriesByAiFolder,
+  removeEntry,
+  removeWorkspaceEntry,
+} from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
+import { requireWorkspaceAccess } from "@/lib/workspace";
 import { invalidatePreviews } from "@/lib/previews-cache";
 
+/**
+ * Resolve the listing scope from the request: per-user (default) or
+ * workspace if `?workspaceId=` is present + the caller is a member.
+ */
+type Scope =
+  | { kind: "user"; userId: string }
+  | { kind: "workspace"; userId: string; workspaceId: string };
+
+async function resolveScope(userId: string, workspaceIdParam: string | null): Promise<Scope> {
+  if (!workspaceIdParam) return { kind: "user", userId };
+  if (!isSafeWorkspaceId(workspaceIdParam)) {
+    throw new AuthError(400, "Invalid workspaceId");
+  }
+  await requireWorkspaceAccess(userId, workspaceIdParam);
+  return { kind: "workspace", userId, workspaceId: workspaceIdParam };
+}
+
 async function objectsToFiles(
-  userId: string,
-  objects: { Key?: string; Size?: number; LastModified?: Date }[]
+  scope: Scope,
+  objects: { Key?: string; Size?: number; LastModified?: Date }[],
 ): Promise<FileItem[]> {
+  // Build the strip-prefix regex once — keys under either scope share the
+  // pattern `<root>/(uploads|inbox|folders/{id})/` so we can compute basename.
+  const stripPrefix = scope.kind === "user"
+    ? new RegExp(`^users/${scope.userId}/(uploads/|folders/[^/]+/)`)
+    : new RegExp(`^workspaces/${scope.workspaceId}/(inbox/|folders/[^/]+/)`);
+
   return Promise.all(
     objects.filter((obj) => obj.Key && obj.Size).map(async (obj) => {
-      // Strip `users/{userId}/(uploads/|folders/{id}/)` to get the basename
-      const stripPrefix = new RegExp(`^users/${userId}/(uploads/|folders/[^/]+/)`);
       const rawName = obj.Key!.replace(stripPrefix, "");
       const name    = rawName.replace(/^\d+-/, "");
       const url     = await getSignedUrl(
         s3,
         new GetObjectCommand({ Bucket: BUCKET, Key: obj.Key! }),
-        { expiresIn: 3600 }
+        { expiresIn: 3600 },
       );
       return {
         id:        obj.Key!,
@@ -37,9 +68,9 @@ async function objectsToFiles(
         mimeType:  mimeFromFilename(name),
         url,
         createdAt: obj.LastModified?.toISOString() ?? new Date().toISOString(),
-        userId,
+        userId:    scope.userId,
       };
-    })
+    }),
   );
 }
 
@@ -54,18 +85,23 @@ export async function GET(req: Request) {
 
   try {
     const { searchParams } = new URL(req.url);
-    const folderId = searchParams.get("folderId");
-    const scope    = searchParams.get("scope");
+    const folderId        = searchParams.get("folderId");
+    const listScope       = searchParams.get("scope");
+    const workspaceIdParam = searchParams.get("workspaceId");
+
+    const scope = await resolveScope(userId, workspaceIdParam);
 
     // ── AI folder: virtual, list via search index ──────────────────────────
     if (folderId && isAiFolderId(folderId)) {
-      const entries = await entriesByAiFolder(userId, folderId);
+      const entries = scope.kind === "workspace"
+        ? await workspaceEntriesByAiFolder(scope.workspaceId, folderId)
+        : await entriesByAiFolder(userId, folderId);
       const files: FileItem[] = await Promise.all(
         entries.map(async (e) => {
           const url = await getSignedUrl(
             s3,
             new GetObjectCommand({ Bucket: BUCKET, Key: e.key }),
-            { expiresIn: 3600 }
+            { expiresIn: 3600 },
           );
           return {
             id:        e.key,
@@ -76,43 +112,55 @@ export async function GET(req: Request) {
             createdAt: e.createdAt,
             userId,
           };
-        })
+        }),
       );
       files.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       return Response.json({ files });
     }
 
     // ── Physical S3 listing ────────────────────────────────────────────────
+    const inboxPrefix = scope.kind === "workspace"
+      ? workspaceInboxPrefix(scope.workspaceId)
+      : userUploadsPrefix(userId);
+    const foldersRootPrefix = scope.kind === "workspace"
+      ? `workspaces/${scope.workspaceId}/folders/`
+      : `users/${userId}/folders/`;
+    const folderPrefix = (fid: string) =>
+      scope.kind === "workspace"
+        ? workspaceFolderPrefix(scope.workspaceId, fid)
+        : userFolderPrefix(userId, fid);
+
     let objects: { Key?: string; Size?: number; LastModified?: Date }[] = [];
 
-    if (scope === "all") {
-      const [uploadRes, folderRes] = await Promise.all([
-        s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: userUploadsPrefix(userId) })),
-        s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: `users/${userId}/folders/` })),
+    if (listScope === "all") {
+      const [inboxRes, folderRes] = await Promise.all([
+        s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: inboxPrefix })),
+        s3.send(new ListObjectsV2Command({ Bucket: BUCKET, Prefix: foldersRootPrefix })),
       ]);
-      objects = [...(uploadRes.Contents ?? []), ...(folderRes.Contents ?? [])];
+      objects = [...(inboxRes.Contents ?? []), ...(folderRes.Contents ?? [])];
     } else if (folderId) {
       if (!isSafeFolderId(folderId)) {
         return Response.json({ error: "Invalid folderId" }, { status: 400 });
       }
       const res = await s3.send(new ListObjectsV2Command({
         Bucket: BUCKET,
-        Prefix: userFolderPrefix(userId, folderId),
+        Prefix: folderPrefix(folderId),
       }));
       objects = res.Contents ?? [];
     } else {
       const res = await s3.send(new ListObjectsV2Command({
         Bucket: BUCKET,
-        Prefix: userUploadsPrefix(userId),
+        Prefix: inboxPrefix,
       }));
       objects = res.Contents ?? [];
     }
 
-    const files = await objectsToFiles(userId, objects);
+    const files = await objectsToFiles(scope, objects);
     files.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 
     return Response.json({ files });
   } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
     const message = err instanceof Error ? err.message : String(err);
     console.error("[GET /api/files]", message);
     return Response.json({ error: message }, { status: 500 });
@@ -129,11 +177,44 @@ export async function DELETE(req: Request) {
   }
 
   try {
-    const { key } = await req.json() as { key?: unknown };
+    const { key, workspaceId } = await req.json() as {
+      key?: unknown;
+      workspaceId?: unknown;
+    };
+
+    if (workspaceId !== undefined && workspaceId !== null && workspaceId !== "") {
+      if (!isSafeWorkspaceId(workspaceId)) {
+        return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
+      }
+      const member = await requireWorkspaceAccess(userId, workspaceId);
+      if (!isWorkspaceOwnedKey(key, workspaceId)) {
+        return Response.json(
+          { error: "Invalid key — must belong to this workspace" },
+          { status: 400 },
+        );
+      }
+
+      // Members can only delete their own uploads; owners can delete anything.
+      // Uploader is recorded on the workspace search-index entry, so check it
+      // before we drop the S3 object.
+      if (member.role !== "owner") {
+        const { getAllWorkspaceEntries } = await import("@/lib/search-index");
+        const entries = await getAllWorkspaceEntries(workspaceId);
+        const entry = entries.find((e) => e.key === key);
+        if (entry && entry.uploaderId && entry.uploaderId !== userId) {
+          return Response.json({ error: "Only the uploader or owner can delete this file" }, { status: 403 });
+        }
+      }
+
+      await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
+      try { await removeWorkspaceEntry(workspaceId, key); } catch { /* ignore */ }
+      return Response.json({ ok: true });
+    }
+
     if (!isUserOwnedKey(key, userId)) {
       return Response.json(
         { error: "Invalid key — must belong to the authenticated user" },
-        { status: 400 }
+        { status: 400 },
       );
     }
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
@@ -141,6 +222,7 @@ export async function DELETE(req: Request) {
     invalidatePreviews(userId);
     return Response.json({ ok: true });
   } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
     const message = err instanceof Error ? err.message : String(err);
     console.error("[DELETE /api/files]", message);
     return Response.json({ error: message }, { status: 500 });

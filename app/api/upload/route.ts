@@ -4,11 +4,16 @@ import {
   s3,
   BUCKET,
   isSafeFolderId,
+  isSafeWorkspaceId,
   folderMetaExists,
+  workspaceFolderMetaExists,
   userUploadsPrefix,
   userFolderPrefix,
+  workspaceInboxPrefix,
+  workspaceFolderPrefix,
 } from "@/lib/s3";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
+import { requireWorkspaceAccess } from "@/lib/workspace";
 
 const ALLOWED_EXTENSIONS = new Set([
   "pdf",  "txt",
@@ -39,16 +44,17 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { fileName, fileType, folderId } = await req.json() as {
+    const { fileName, fileType, folderId, workspaceId } = await req.json() as {
       fileName?: unknown;
       fileType?: unknown;
       folderId?: unknown;
+      workspaceId?: unknown;
     };
 
     if (!isValidFileName(fileName)) {
       return Response.json(
         { error: "Invalid fileName — must be 1-200 chars with an allowed extension" },
-        { status: 400 }
+        { status: 400 },
       );
     }
 
@@ -62,13 +68,29 @@ export async function POST(req: Request) {
 
     const safeFolderId = typeof folderId === "string" && folderId.length > 0 ? folderId : null;
 
-    if (safeFolderId && !(await folderMetaExists(userId, safeFolderId))) {
-      return Response.json({ error: "Target folder does not exist" }, { status: 404 });
-    }
+    let key: string;
 
-    const key = safeFolderId
-      ? `${userFolderPrefix(userId, safeFolderId)}${Date.now()}-${fileName}`
-      : `${userUploadsPrefix(userId)}${Date.now()}-${fileName}`;
+    if (workspaceId !== undefined && workspaceId !== null && workspaceId !== "") {
+      if (!isSafeWorkspaceId(workspaceId)) {
+        return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
+      }
+      await requireWorkspaceAccess(userId, workspaceId);
+
+      if (safeFolderId && !(await workspaceFolderMetaExists(workspaceId, safeFolderId))) {
+        return Response.json({ error: "Target folder does not exist in this workspace" }, { status: 404 });
+      }
+
+      key = safeFolderId
+        ? `${workspaceFolderPrefix(workspaceId, safeFolderId)}${Date.now()}-${fileName}`
+        : `${workspaceInboxPrefix(workspaceId)}${Date.now()}-${fileName}`;
+    } else {
+      if (safeFolderId && !(await folderMetaExists(userId, safeFolderId))) {
+        return Response.json({ error: "Target folder does not exist" }, { status: 404 });
+      }
+      key = safeFolderId
+        ? `${userFolderPrefix(userId, safeFolderId)}${Date.now()}-${fileName}`
+        : `${userUploadsPrefix(userId)}${Date.now()}-${fileName}`;
+    }
 
     const command = new PutObjectCommand({
       Bucket:      BUCKET,
@@ -82,6 +104,7 @@ export async function POST(req: Request) {
 
     return Response.json({ uploadUrl, key });
   } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
     const message = err instanceof Error ? err.message : String(err);
     console.error("[POST /api/upload]", message);
     return Response.json({ error: message }, { status: 500 });

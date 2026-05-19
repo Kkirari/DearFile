@@ -3,7 +3,15 @@
  * Lets us full-text search by Thai/English keywords without scanning S3 tags
  * (S3 tags are ASCII-only) and lets AI folders compute counts cheaply.
  *
- * Now supports:
+ * Two scopes share the same code path:
+ *   - User scope    — index at `users/{U}/_search-index.json`
+ *   - Workspace scope — index at `workspaces/{W}/_search-index.json`
+ *
+ * Existing per-user callers keep using `upsertEntry(userId, …)` etc; new
+ * workspace callers use the `*WorkspaceEntry` twins. Internally both route
+ * through the same Scope-aware implementation.
+ *
+ * Features:
  *   - Relevance scoring (filename > subject > keywords > detail)
  *   - Fuzzy matching (Levenshtein distance for typo tolerance)
  *   - Filtering by category (photos / docs / finance / academic / all)
@@ -12,7 +20,7 @@
  */
 
 import { GetObjectCommand, PutObjectCommand } from "@aws-sdk/client-s3";
-import { s3, BUCKET, userSearchIndexKey } from "./s3";
+import { s3, BUCKET, userSearchIndexKey, workspaceSearchIndexKey } from "./s3";
 
 export interface IndexEntry {
   key: string;                    // current S3 key (after rename)
@@ -24,10 +32,17 @@ export interface IndexEntry {
   date: string | null;
   keywords: string[];             // mixed TH + EN
   ai_folder_id: string;
-  user_folder_id: string | null;  // physical folder (uploads/ → null)
+  /**
+   * Physical folder id derived from the S3 key, or null for the inbox.
+   * Field name is historical (`user_folder_id`) — for workspace entries it
+   * is the folder id under `workspaces/{W}/folders/{folderId}/`.
+   */
+  user_folder_id: string | null;
   size: number;
   mimeType: string;
   createdAt: string;
+  /** Set on workspace entries — the LINE userId that uploaded the file. */
+  uploaderId?: string;
 }
 
 export interface ScoredEntry extends IndexEntry {
@@ -38,13 +53,33 @@ export interface ScoredEntry extends IndexEntry {
 export type SortMode = "relevance" | "newest" | "oldest" | "largest";
 export type FilterMode = "all" | "photos" | "documents" | "finance" | "academic";
 
-// ── Persistence (per-user) ────────────────────────────────────────────────────
+// ── Scope abstraction ─────────────────────────────────────────────────────
 
-async function loadIndex(userId: string): Promise<IndexEntry[]> {
+interface Scope {
+  /** Stable in-process key for the per-scope mutation lock. */
+  lockKey: string;
+  /** S3 key of the index file for this scope. */
+  indexKey: string;
+}
+
+function userScope(userId: string): Scope {
+  return { lockKey: `user:${userId}`, indexKey: userSearchIndexKey(userId) };
+}
+
+function workspaceScope(workspaceId: string): Scope {
+  return {
+    lockKey:  `workspace:${workspaceId}`,
+    indexKey: workspaceSearchIndexKey(workspaceId),
+  };
+}
+
+// ── Persistence ───────────────────────────────────────────────────────────
+
+async function loadIndex(scope: Scope): Promise<IndexEntry[]> {
   try {
     const res = await s3.send(new GetObjectCommand({
       Bucket: BUCKET,
-      Key:    userSearchIndexKey(userId),
+      Key:    scope.indexKey,
     }));
     const body = await res.Body?.transformToString();
     if (!body) return [];
@@ -62,59 +97,63 @@ async function loadIndex(userId: string): Promise<IndexEntry[]> {
   }
 }
 
-async function saveIndex(userId: string, entries: IndexEntry[]): Promise<void> {
+async function saveIndex(scope: Scope, entries: IndexEntry[]): Promise<void> {
   await s3.send(new PutObjectCommand({
     Bucket:      BUCKET,
-    Key:         userSearchIndexKey(userId),
+    Key:         scope.indexKey,
     Body:        JSON.stringify(entries),
     ContentType: "application/json",
   }));
 }
 
-// Per-user serialization. Concurrent writes to the SAME user's index would
-// otherwise lose updates (load→mutate→save with no ETag). Different users
+// Per-scope serialization. Concurrent writes to the SAME index would
+// otherwise lose updates (load→mutate→save with no ETag). Different scopes
 // don't block each other. Cross-instance races still possible — a proper
 // fix needs ETag-conditional writes or a real KV store.
 const mutationChains = new Map<string, Promise<unknown>>();
 
-function withIndexLock<T>(userId: string, fn: () => Promise<T>): Promise<T> {
-  const prev = mutationChains.get(userId) ?? Promise.resolve();
+function withIndexLock<T>(scope: Scope, fn: () => Promise<T>): Promise<T> {
+  const prev = mutationChains.get(scope.lockKey) ?? Promise.resolve();
   const next = prev.then(fn, fn);
-  mutationChains.set(userId, next.catch(() => undefined));
+  mutationChains.set(scope.lockKey, next.catch(() => undefined));
   return next;
 }
 
-export function upsertEntry(userId: string, entry: IndexEntry): Promise<void> {
-  return withIndexLock(userId, async () => {
-    const idx = await loadIndex(userId);
-    const existing = idx.findIndex((e) => e.key === entry.key);
-    if (existing >= 0) idx[existing] = entry;
-    else idx.push(entry);
-    await saveIndex(userId, idx);
-  });
-}
-
-export function removeEntry(userId: string, key: string): Promise<void> {
-  return withIndexLock(userId, async () => {
-    const idx = await loadIndex(userId);
-    const filtered = idx.filter((e) => e.key !== key);
-    if (filtered.length !== idx.length) await saveIndex(userId, filtered);
-  });
-}
-
 /**
- * Derive user_folder_id from a per-user S3 key. Returns null for inbox keys.
- *   users/{U}/folders/{F}/file → F
- *   users/{U}/uploads/file     → null
+ * Derive the physical folder id from an S3 key for either scope shape.
+ *   users/{U}/folders/{F}/file       → F
+ *   workspaces/{W}/folders/{F}/file  → F
+ *   users/{U}/uploads/file           → null
+ *   workspaces/{W}/inbox/file        → null
  */
-function userFolderIdFromKey(key: string): string | null {
-  const m = key.match(/^users\/[^/]+\/folders\/([^/]+)\//);
+function folderIdFromKey(key: string): string | null {
+  const m = key.match(/^(?:users|workspaces)\/[^/]+\/folders\/([^/]+)\//);
   return m?.[1] ?? null;
 }
 
-export function renameEntryKey(userId: string, oldKey: string, newKey: string): Promise<void> {
-  return withIndexLock(userId, async () => {
-    const idx = await loadIndex(userId);
+// ── Scoped mutations (internal) ───────────────────────────────────────────
+
+function upsertEntryScoped(scope: Scope, entry: IndexEntry): Promise<void> {
+  return withIndexLock(scope, async () => {
+    const idx = await loadIndex(scope);
+    const existing = idx.findIndex((e) => e.key === entry.key);
+    if (existing >= 0) idx[existing] = entry;
+    else idx.push(entry);
+    await saveIndex(scope, idx);
+  });
+}
+
+function removeEntryScoped(scope: Scope, key: string): Promise<void> {
+  return withIndexLock(scope, async () => {
+    const idx = await loadIndex(scope);
+    const filtered = idx.filter((e) => e.key !== key);
+    if (filtered.length !== idx.length) await saveIndex(scope, filtered);
+  });
+}
+
+function renameEntryKeyScoped(scope: Scope, oldKey: string, newKey: string): Promise<void> {
+  return withIndexLock(scope, async () => {
+    const idx = await loadIndex(scope);
     const target = idx.find((e) => e.key === oldKey);
     if (!target) return;
     target.key = newKey;
@@ -122,82 +161,157 @@ export function renameEntryKey(userId: string, oldKey: string, newKey: string): 
     // Keep user_folder_id in sync with the new path — moves between
     // folders/inbox previously left this stale, which broke folder-delete
     // cascades and AI-folder counts after a move.
-    target.user_folder_id = userFolderIdFromKey(newKey);
-    await saveIndex(userId, idx);
+    target.user_folder_id = folderIdFromKey(newKey);
+    await saveIndex(scope, idx);
   });
 }
 
-/**
- * Drop every index entry whose user_folder_id matches `folderId`. Used by
- * folder cascade delete. Returns the count removed.
- */
-export function removeEntriesByUserFolderId(userId: string, folderId: string): Promise<number> {
-  return withIndexLock(userId, async () => {
-    const idx = await loadIndex(userId);
+function removeEntriesByFolderIdScoped(scope: Scope, folderId: string): Promise<number> {
+  return withIndexLock(scope, async () => {
+    const idx = await loadIndex(scope);
     const filtered = idx.filter((e) => e.user_folder_id !== folderId);
     const removed = idx.length - filtered.length;
-    if (removed > 0) await saveIndex(userId, filtered);
+    if (removed > 0) await saveIndex(scope, filtered);
     return removed;
   });
 }
 
-/**
- * Apply many key renames in a single load→mutate→save cycle. Used by
- * batch move so a 50-file move doesn't read+write the entire index 50
- * times. Updates filename and user_folder_id from the new path, same as
- * the single renameEntryKey.
- */
-export function bulkRenameEntryKeys(
-  userId: string,
-  renames: { oldKey: string; newKey: string }[]
+function bulkRenameEntryKeysScoped(
+  scope: Scope,
+  renames: { oldKey: string; newKey: string }[],
 ): Promise<number> {
-  return withIndexLock(userId, async () => {
+  return withIndexLock(scope, async () => {
     if (renames.length === 0) return 0;
     const map = new Map(renames.map((r) => [r.oldKey, r.newKey]));
-    const idx = await loadIndex(userId);
+    const idx = await loadIndex(scope);
     let changed = 0;
     for (const e of idx) {
       const newKey = map.get(e.key);
       if (!newKey) continue;
       e.key = newKey;
       e.filename = newKey.split("/").pop() ?? e.filename;
-      e.user_folder_id = userFolderIdFromKey(newKey);
+      e.user_folder_id = folderIdFromKey(newKey);
       changed++;
     }
-    if (changed > 0) await saveIndex(userId, idx);
+    if (changed > 0) await saveIndex(scope, idx);
     return changed;
   });
 }
 
-/**
- * Remove many entries by key in a single load→mutate→save cycle. Pair
- * with batch delete to avoid the N reads + N writes pattern.
- */
-export function bulkRemoveEntries(userId: string, keys: string[]): Promise<number> {
-  return withIndexLock(userId, async () => {
+function bulkRemoveEntriesScoped(scope: Scope, keys: string[]): Promise<number> {
+  return withIndexLock(scope, async () => {
     if (keys.length === 0) return 0;
     const drop = new Set(keys);
-    const idx = await loadIndex(userId);
+    const idx = await loadIndex(scope);
     const filtered = idx.filter((e) => !drop.has(e.key));
     const removed = idx.length - filtered.length;
-    if (removed > 0) await saveIndex(userId, filtered);
+    if (removed > 0) await saveIndex(scope, filtered);
     return removed;
   });
 }
 
+// ── Public API: user-scoped (existing callers, unchanged signatures) ──────
+
+export function upsertEntry(userId: string, entry: IndexEntry): Promise<void> {
+  return upsertEntryScoped(userScope(userId), entry);
+}
+
+export function removeEntry(userId: string, key: string): Promise<void> {
+  return removeEntryScoped(userScope(userId), key);
+}
+
+export function renameEntryKey(userId: string, oldKey: string, newKey: string): Promise<void> {
+  return renameEntryKeyScoped(userScope(userId), oldKey, newKey);
+}
+
+export function removeEntriesByUserFolderId(userId: string, folderId: string): Promise<number> {
+  return removeEntriesByFolderIdScoped(userScope(userId), folderId);
+}
+
+export function bulkRenameEntryKeys(
+  userId: string,
+  renames: { oldKey: string; newKey: string }[],
+): Promise<number> {
+  return bulkRenameEntryKeysScoped(userScope(userId), renames);
+}
+
+export function bulkRemoveEntries(userId: string, keys: string[]): Promise<number> {
+  return bulkRemoveEntriesScoped(userScope(userId), keys);
+}
+
 export async function getAllEntries(userId: string): Promise<IndexEntry[]> {
-  return loadIndex(userId);
+  return loadIndex(userScope(userId));
 }
 
 export async function countByAiFolder(userId: string): Promise<Record<string, number>> {
-  const idx = await loadIndex(userId);
+  const idx = await loadIndex(userScope(userId));
   const out: Record<string, number> = {};
   for (const e of idx) out[e.ai_folder_id] = (out[e.ai_folder_id] ?? 0) + 1;
   return out;
 }
 
 export async function entriesByAiFolder(userId: string, folderId: string): Promise<IndexEntry[]> {
-  const idx = await loadIndex(userId);
+  const idx = await loadIndex(userScope(userId));
+  return idx.filter((e) => e.ai_folder_id === folderId);
+}
+
+// ── Public API: workspace-scoped twins ────────────────────────────────────
+
+export function upsertWorkspaceEntry(workspaceId: string, entry: IndexEntry): Promise<void> {
+  return upsertEntryScoped(workspaceScope(workspaceId), entry);
+}
+
+export function removeWorkspaceEntry(workspaceId: string, key: string): Promise<void> {
+  return removeEntryScoped(workspaceScope(workspaceId), key);
+}
+
+export function renameWorkspaceEntryKey(
+  workspaceId: string,
+  oldKey: string,
+  newKey: string,
+): Promise<void> {
+  return renameEntryKeyScoped(workspaceScope(workspaceId), oldKey, newKey);
+}
+
+export function removeWorkspaceEntriesByFolderId(
+  workspaceId: string,
+  folderId: string,
+): Promise<number> {
+  return removeEntriesByFolderIdScoped(workspaceScope(workspaceId), folderId);
+}
+
+export function bulkRenameWorkspaceEntryKeys(
+  workspaceId: string,
+  renames: { oldKey: string; newKey: string }[],
+): Promise<number> {
+  return bulkRenameEntryKeysScoped(workspaceScope(workspaceId), renames);
+}
+
+export function bulkRemoveWorkspaceEntries(
+  workspaceId: string,
+  keys: string[],
+): Promise<number> {
+  return bulkRemoveEntriesScoped(workspaceScope(workspaceId), keys);
+}
+
+export async function getAllWorkspaceEntries(workspaceId: string): Promise<IndexEntry[]> {
+  return loadIndex(workspaceScope(workspaceId));
+}
+
+export async function countWorkspaceByAiFolder(
+  workspaceId: string,
+): Promise<Record<string, number>> {
+  const idx = await loadIndex(workspaceScope(workspaceId));
+  const out: Record<string, number> = {};
+  for (const e of idx) out[e.ai_folder_id] = (out[e.ai_folder_id] ?? 0) + 1;
+  return out;
+}
+
+export async function workspaceEntriesByAiFolder(
+  workspaceId: string,
+  folderId: string,
+): Promise<IndexEntry[]> {
+  const idx = await loadIndex(workspaceScope(workspaceId));
   return idx.filter((e) => e.ai_folder_id === folderId);
 }
 
@@ -271,26 +385,22 @@ function matchesFilter(entry: IndexEntry, filter: FilterMode): boolean {
   return true;
 }
 
-// ── Main search ───────────────────────────────────────────────────────────────
+// ── Search (scope-aware internal + user-scoped public) ────────────────────
 
 export interface SearchOptions {
   filter?: FilterMode;
   sort?:   SortMode;
 }
 
-/**
- * Score-ranked search. Returns entries with `score` and `matchedIn` metadata.
- * Field weights:  filename(2.5) > subject(2.0) > keywords(1.5) > detail(0.8)
- */
-export async function searchScored(
-  userId: string,
+async function searchScopedScored(
+  scope: Scope,
   query: string,
-  options: SearchOptions = {}
+  options: SearchOptions = {},
 ): Promise<ScoredEntry[]> {
   const { filter = "all", sort = "relevance" } = options;
   const q = query.trim().toLowerCase();
 
-  const idx = await loadIndex(userId);
+  const idx = await loadIndex(scope);
   const filtered = idx.filter((e) => matchesFilter(e, filter));
 
   // No query → return all (filtered) entries with score 0
@@ -305,45 +415,47 @@ export async function searchScored(
     let total = 0;
     const matchedIn: string[] = [];
 
-    // Filename — weight 2.5
     const fnScore = fieldScore(e.filename, q);
-    if (fnScore > 0) {
-      total += fnScore * 2.5;
-      matchedIn.push("filename");
-    }
+    if (fnScore > 0) { total += fnScore * 2.5; matchedIn.push("filename"); }
 
-    // Subject — weight 2.0
     const subjScore = fieldScore(e.subject, q);
-    if (subjScore > 0) {
-      total += subjScore * 2.0;
-      matchedIn.push("subject");
-    }
+    if (subjScore > 0) { total += subjScore * 2.0; matchedIn.push("subject"); }
 
-    // Keywords — weight 1.5 (best matching keyword)
     let bestKw = 0;
     let bestKwTerm = "";
     for (const kw of e.keywords) {
       const s = fieldScore(kw, q);
       if (s > bestKw) { bestKw = s; bestKwTerm = kw; }
     }
-    if (bestKw > 0) {
-      total += bestKw * 1.5;
-      matchedIn.push(`keyword:${bestKwTerm}`);
-    }
+    if (bestKw > 0) { total += bestKw * 1.5; matchedIn.push(`keyword:${bestKwTerm}`); }
 
-    // Detail — weight 0.8
     const detailScore = fieldScore(e.detail, q);
-    if (detailScore > 0) {
-      total += detailScore * 0.8;
-      matchedIn.push("detail");
-    }
+    if (detailScore > 0) { total += detailScore * 0.8; matchedIn.push("detail"); }
 
-    if (total > 0) {
-      scored.push({ ...e, score: total, matchedIn });
-    }
+    if (total > 0) scored.push({ ...e, score: total, matchedIn });
   }
 
   return applySort(scored, sort);
+}
+
+/**
+ * Score-ranked search. Returns entries with `score` and `matchedIn` metadata.
+ * Field weights:  filename(2.5) > subject(2.0) > keywords(1.5) > detail(0.8)
+ */
+export function searchScored(
+  userId: string,
+  query: string,
+  options: SearchOptions = {},
+): Promise<ScoredEntry[]> {
+  return searchScopedScored(userScope(userId), query, options);
+}
+
+export function searchWorkspaceScored(
+  workspaceId: string,
+  query: string,
+  options: SearchOptions = {},
+): Promise<ScoredEntry[]> {
+  return searchScopedScored(workspaceScope(workspaceId), query, options);
 }
 
 function applySort(entries: ScoredEntry[], sort: SortMode): ScoredEntry[] {
@@ -366,29 +478,23 @@ function applySort(entries: ScoredEntry[], sort: SortMode): ScoredEntry[] {
   }
 }
 
-// ── Suggestions for autocomplete ──────────────────────────────────────────────
+// ── Suggestions for autocomplete ──────────────────────────────────────────
 
-/**
- * Returns up to N keyword/filename suggestions whose start matches the query.
- * Used by the autocomplete dropdown while user is typing.
- */
-export async function suggest(userId: string, query: string, limit = 6): Promise<string[]> {
+async function suggestScoped(scope: Scope, query: string, limit = 6): Promise<string[]> {
   const q = query.trim().toLowerCase();
   if (!q || q.length < 1) return [];
 
-  const idx = await loadIndex(userId);
+  const idx = await loadIndex(scope);
   const seen = new Set<string>();
   const results: { term: string; weight: number }[] = [];
 
   for (const e of idx) {
-    // Subject (highest priority)
     const subj = e.subject.toLowerCase();
     if (subj.startsWith(q) && !seen.has(subj)) {
       seen.add(subj);
       results.push({ term: e.subject, weight: 3 });
     }
 
-    // Keywords (medium priority)
     for (const kw of e.keywords) {
       const lk = kw.toLowerCase();
       if (lk.startsWith(q) && !seen.has(lk)) {
@@ -397,10 +503,8 @@ export async function suggest(userId: string, query: string, limit = 6): Promise
       }
     }
 
-    // Filename word starts (lowest priority)
     const filenameLow = e.filename.toLowerCase();
     if (filenameLow.includes(q) && !seen.has(filenameLow)) {
-      // include filename only if the query matches near a word boundary
       const words = filenameLow.split(/[_\-\s.]/);
       if (words.some((w) => w.startsWith(q))) {
         seen.add(filenameLow);
@@ -415,10 +519,26 @@ export async function suggest(userId: string, query: string, limit = 6): Promise
     .map((r) => r.term);
 }
 
-// ── Category counts (for filter chip badges) ──────────────────────────────────
+/**
+ * Returns up to N keyword/filename suggestions whose start matches the query.
+ * Used by the autocomplete dropdown while user is typing.
+ */
+export function suggest(userId: string, query: string, limit = 6): Promise<string[]> {
+  return suggestScoped(userScope(userId), query, limit);
+}
 
-export async function countByFilter(userId: string): Promise<Record<FilterMode, number>> {
-  const idx = await loadIndex(userId);
+export function suggestWorkspace(
+  workspaceId: string,
+  query: string,
+  limit = 6,
+): Promise<string[]> {
+  return suggestScoped(workspaceScope(workspaceId), query, limit);
+}
+
+// ── Category counts (for filter chip badges) ──────────────────────────────
+
+async function countByFilterScoped(scope: Scope): Promise<Record<FilterMode, number>> {
+  const idx = await loadIndex(scope);
   const out: Record<FilterMode, number> = {
     all: idx.length,
     photos: 0,
@@ -433,4 +553,14 @@ export async function countByFilter(userId: string): Promise<Record<FilterMode, 
     if (e.category === "academic") out.academic++;
   }
   return out;
+}
+
+export function countByFilter(userId: string): Promise<Record<FilterMode, number>> {
+  return countByFilterScoped(userScope(userId));
+}
+
+export function countWorkspaceByFilter(
+  workspaceId: string,
+): Promise<Record<FilterMode, number>> {
+  return countByFilterScoped(workspaceScope(workspaceId));
 }
