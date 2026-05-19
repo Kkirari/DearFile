@@ -399,6 +399,17 @@ export function removeMember(workspaceId: string, userId: string): Promise<Works
   });
 }
 
+export function renameWorkspace(workspaceId: string, name: string): Promise<WorkspaceMeta> {
+  const trimmed = name.trim().slice(0, 80);
+  if (!trimmed) throw new AuthError(400, "Workspace name cannot be empty");
+  return withLock(metaLocks, workspaceId, () =>
+    mutateMeta(workspaceId, (m) => {
+      if (m.name === trimmed) return META_SKIP;
+      m.name = trimmed;
+    }),
+  );
+}
+
 export function markOrphaned(workspaceId: string): Promise<WorkspaceMeta | null> {
   return withLock(metaLocks, workspaceId, async () => {
     try {

@@ -2,52 +2,96 @@
 
 /**
  * Horizontal chip strip for switching between personal storage and shared
- * workspaces the user belongs to.
+ * workspaces the user belongs to. Plus controls for creating a new
+ * workspace and opening settings on the active one.
  *
- * Lives at the top of the LIFF home/folders tabs. Hidden entirely when the
- * user has no shared workspaces — we don't want to clutter the UI for solo
- * users.
+ * Lives at the top of the LIFF home/folders tabs. Always shows at least
+ * the Personal chip + "+" so users can always create a workspace, even
+ * if they have none yet.
  */
 
-import { User, Users, AlertCircle } from "lucide-react";
-import { useWorkspace } from "@/providers/workspace-provider";
+import { useState } from "react";
+import { AlertCircle, MoreHorizontal, Plus, User, Users } from "lucide-react";
+import { useWorkspace, type WorkspaceSummary } from "@/providers/workspace-provider";
+import { WorkspaceCreateSheet } from "@/components/workspace-create-sheet";
+import { WorkspaceSettingsSheet } from "@/components/workspace-settings-sheet";
 
 export function WorkspaceSwitcher() {
-  const { currentWorkspaceId, workspaces, setCurrentWorkspace, loading } = useWorkspace();
+  const {
+    currentWorkspaceId,
+    currentWorkspace,
+    workspaces,
+    setCurrentWorkspace,
+    loading,
+  } = useWorkspace();
 
-  // Solo users see nothing. Workspaces only appear after the user joins one
-  // (via being added to a LINE group, or creating one in-app later).
+  const [createOpen, setCreateOpen]     = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+
   if (loading) return null;
-  if (workspaces.length === 0) return null;
 
   return (
-    <div
-      role="tablist"
-      aria-label="Workspaces"
-      className="scrollbar-hide -mx-5 flex items-center gap-2 overflow-x-auto px-5 pb-1"
-    >
-      <Chip
-        active={currentWorkspaceId === null}
-        onClick={() => setCurrentWorkspace(null)}
-        icon={<User size={14} strokeWidth={2.25} />}
-        label="Personal"
-      />
-      {workspaces.map((ws) => (
+    <>
+      <div
+        role="tablist"
+        aria-label="Workspaces"
+        className="scrollbar-hide -mx-5 flex items-center gap-2 overflow-x-auto px-5 pb-1"
+      >
         <Chip
-          key={ws.id}
-          active={currentWorkspaceId === ws.id}
-          onClick={() => setCurrentWorkspace(ws.id)}
-          icon={
-            ws.orphaned
-              ? <AlertCircle size={14} strokeWidth={2.25} />
-              : <Users size={14} strokeWidth={2.25} />
-          }
-          label={ws.name}
-          meta={ws.role === "owner" ? "Owner" : `${ws.memberCount} members`}
-          dimmed={ws.orphaned}
+          active={currentWorkspaceId === null}
+          onClick={() => setCurrentWorkspace(null)}
+          icon={<User size={14} strokeWidth={2.25} />}
+          label="Personal"
         />
-      ))}
-    </div>
+        {workspaces.map((ws) => (
+          <Chip
+            key={ws.id}
+            active={currentWorkspaceId === ws.id}
+            onClick={() => setCurrentWorkspace(ws.id)}
+            icon={
+              ws.orphaned
+                ? <AlertCircle size={14} strokeWidth={2.25} />
+                : <Users size={14} strokeWidth={2.25} />
+            }
+            label={ws.name}
+            meta={ws.role === "owner" ? "Owner" : `${ws.memberCount} members`}
+            dimmed={ws.orphaned}
+          />
+        ))}
+
+        {/* Settings on the active workspace */}
+        {currentWorkspace && (
+          <button
+            onClick={() => setSettingsOpen(true)}
+            aria-label={`Settings for ${currentWorkspace.name}`}
+            className="flex-shrink-0 inline-flex items-center justify-center h-[34px] w-[34px] rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] text-[#9b869c] active:scale-[0.97] transition-transform"
+          >
+            <MoreHorizontal size={14} strokeWidth={2.5} />
+          </button>
+        )}
+
+        {/* Create new workspace */}
+        <button
+          onClick={() => setCreateOpen(true)}
+          aria-label="Create new workspace"
+          className="flex-shrink-0 inline-flex items-center gap-1 rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-dashed border-[#9b869c]/60 px-3 py-2 text-[12.5px] font-bold text-[#9b869c] active:scale-[0.97] transition-transform"
+        >
+          <Plus size={13} strokeWidth={2.75} />
+          New
+        </button>
+      </div>
+
+      {createOpen && (
+        <WorkspaceCreateSheet onClose={() => setCreateOpen(false)} />
+      )}
+
+      {settingsOpen && currentWorkspace && (
+        <WorkspaceSettingsSheet
+          workspace={currentWorkspace}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -85,3 +129,6 @@ function Chip({
     </button>
   );
 }
+
+// Re-export type so consumers can avoid importing from provider directly.
+export type { WorkspaceSummary };

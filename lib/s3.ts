@@ -155,6 +155,32 @@ export function workspaceMetaKey(workspaceId: string): string {
   return `workspaces/${workspaceId}/_meta.json`;
 }
 
+// ── Workspace invite paths ────────────────────────────────────────────────
+//
+// Magic-link invites for direct workspace sharing (Phase 2). Stored as
+// individual JSON records under the workspace's invite prefix so list +
+// revoke are cheap; a reverse index at `invite-bindings/{token}.json`
+// lets the accept endpoint resolve a token to its workspace without
+// scanning every workspace.
+
+export function workspaceInvitesPrefix(workspaceId: string): string {
+  return `workspaces/${workspaceId}/invites/`;
+}
+export function workspaceInviteKey(workspaceId: string, token: string): string {
+  return `workspaces/${workspaceId}/invites/${token}.json`;
+}
+export function inviteBindingKey(token: string): string {
+  return `invite-bindings/${token}.json`;
+}
+
+/**
+ * Invite tokens are 32 lowercase hex chars (16 random bytes). Server
+ * generates and validates shape on every public boundary.
+ */
+export function isSafeInviteToken(token: unknown): token is string {
+  return typeof token === "string" && /^[a-f0-9]{32}$/.test(token);
+}
+
 /**
  * Workspace ids are server-generated kebab-style ids (`ws_<random>`). Same
  * safety rules as folder ids — no slashes, no traversal — but with a
