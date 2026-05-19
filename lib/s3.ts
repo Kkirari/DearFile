@@ -85,6 +85,9 @@ export async function getS3ObjectTags(key: string): Promise<Record<string, strin
 //   users/{U}/folders/{folderId}/{ts}-{name} — file inside a folder
 //   users/{U}/folder-meta/{folderId}.json    — folder metadata
 //   users/{U}/_search-index.json             — that user's search index
+//   users/{U}/_workspaces.json               — denormalized list of shared
+//                                              workspaces this user belongs
+//                                              to (Phase 1 of group sharing)
 //
 // All client-supplied keys, ids, and folder ids are validated before being
 // composed into a path so the namespace can't be escaped.
@@ -110,6 +113,57 @@ export function userFolderMetaKey(userId: string, folderId: string): string {
 export function userSearchIndexKey(userId: string): string {
   return `users/${userId}/_search-index.json`;
 }
+export function userWorkspacesIndexKey(userId: string): string {
+  return `users/${userId}/_workspaces.json`;
+}
+
+// ── Shared-workspace prefix layout ────────────────────────────────────────
+//
+// A workspace is a multi-member container that mirrors the per-user layout
+// but uses `workspaces/{workspaceId}/...` instead. Same physical shape;
+// access is gated by membership in the workspace's `_meta.json`.
+//
+//   workspaces/{W}/inbox/{ts}-{name}              — shared inbox
+//   workspaces/{W}/folders/{folderId}/{ts}-{name} — file in shared folder
+//   workspaces/{W}/folder-meta/{folderId}.json    — folder metadata
+//   workspaces/{W}/_search-index.json             — workspace search index
+//   workspaces/{W}/_meta.json                     — name, owner, members,
+//                                                    optional lineGroupId
+
+export function workspacePrefix(workspaceId: string): string {
+  return `workspaces/${workspaceId}/`;
+}
+export function workspaceInboxPrefix(workspaceId: string): string {
+  return `workspaces/${workspaceId}/inbox/`;
+}
+export function workspaceFoldersPrefix(workspaceId: string): string {
+  return `workspaces/${workspaceId}/folders/`;
+}
+export function workspaceFolderPrefix(workspaceId: string, folderId: string): string {
+  return `workspaces/${workspaceId}/folders/${folderId}/`;
+}
+export function workspaceFolderMetaPrefix(workspaceId: string): string {
+  return `workspaces/${workspaceId}/folder-meta/`;
+}
+export function workspaceFolderMetaKey(workspaceId: string, folderId: string): string {
+  return `workspaces/${workspaceId}/folder-meta/${folderId}.json`;
+}
+export function workspaceSearchIndexKey(workspaceId: string): string {
+  return `workspaces/${workspaceId}/_search-index.json`;
+}
+export function workspaceMetaKey(workspaceId: string): string {
+  return `workspaces/${workspaceId}/_meta.json`;
+}
+
+/**
+ * Workspace ids are server-generated kebab-style ids (`ws_<random>`). Same
+ * safety rules as folder ids — no slashes, no traversal — but with a
+ * required `ws_` prefix so we can tell them apart from anything else.
+ */
+export function isSafeWorkspaceId(id: unknown): id is string {
+  if (typeof id !== "string" || id.length === 0 || id.length > 64) return false;
+  return /^ws_[a-zA-Z0-9_-]+$/.test(id);
+}
 
 /**
  * True only for keys that are inside the given user's data namespace
@@ -128,6 +182,24 @@ export function isUserOwnedKey(key: unknown, userId: string): key is string {
 }
 
 /**
+ * True only for keys that are inside the given workspace's data namespace
+ * (`workspaces/{workspaceId}/inbox/...` or `.../folders/{id}/...`).
+ * Same defense as isUserOwnedKey — call before any S3 mutation that uses a
+ * client-supplied key under a workspace. Note: membership is checked
+ * separately via requireWorkspaceAccess; this only validates path shape.
+ */
+export function isWorkspaceOwnedKey(key: unknown, workspaceId: string): key is string {
+  if (typeof key !== "string" || key.length === 0) return false;
+  if (key.includes("..") || key.includes("//")) return false;
+  if (!isSafeWorkspaceId(workspaceId)) return false;
+  const expected = `workspaces/${workspaceId}/`;
+  if (!key.startsWith(expected)) return false;
+  const rest = key.slice(expected.length);
+  if (rest.startsWith("inbox/")) return rest.length > "inbox/".length;
+  return /^folders\/[^/]+\/.+/.test(rest);
+}
+
+/**
  * True if `folderId` exists for `userId` — i.e. its metadata file lives in
  * the user's folder-meta/ prefix. Use before constructing a destination key
  * on move so callers cannot create files in ghost (or other users') folders.
@@ -137,6 +209,26 @@ export async function folderMetaExists(userId: string, folderId: string): Promis
     await s3.send(new HeadObjectCommand({
       Bucket: BUCKET,
       Key:    userFolderMetaKey(userId, folderId),
+    }));
+    return true;
+  } catch (err: unknown) {
+    const e = err as { name?: string; $metadata?: { httpStatusCode?: number } };
+    if (e.name === "NotFound" || e.$metadata?.httpStatusCode === 404) return false;
+    throw err;
+  }
+}
+
+/**
+ * Workspace-variant of folderMetaExists — checks `workspaces/{W}/folder-meta/`.
+ */
+export async function workspaceFolderMetaExists(
+  workspaceId: string,
+  folderId: string,
+): Promise<boolean> {
+  try {
+    await s3.send(new HeadObjectCommand({
+      Bucket: BUCKET,
+      Key:    workspaceFolderMetaKey(workspaceId, folderId),
     }));
     return true;
   } catch (err: unknown) {
