@@ -48,6 +48,7 @@ export function WorkspaceSwitcher() {
             key={ws.id}
             active={currentWorkspaceId === ws.id}
             onClick={() => setCurrentWorkspace(ws.id)}
+            onSettings={() => setSettingsOpen(true)}
             icon={
               ws.orphaned
                 ? <AlertCircle size={14} strokeWidth={2.25} />
@@ -58,17 +59,6 @@ export function WorkspaceSwitcher() {
             dimmed={ws.orphaned}
           />
         ))}
-
-        {/* Settings on the active workspace */}
-        {currentWorkspace && (
-          <button
-            onClick={() => setSettingsOpen(true)}
-            aria-label={`Settings for ${currentWorkspace.name}`}
-            className="flex-shrink-0 inline-flex items-center justify-center h-[34px] w-[34px] rounded-full bg-[#fbfaf6] dark:bg-[#252220] border border-[#e0d8cc] dark:border-[#3a3430] text-[#9b869c] active:scale-[0.97] transition-transform"
-          >
-            <MoreHorizontal size={14} strokeWidth={2.5} />
-          </button>
-        )}
 
         {/* Create new workspace */}
         <button
@@ -96,23 +86,33 @@ export function WorkspaceSwitcher() {
 }
 
 function Chip({
-  active, onClick, icon, label, meta, dimmed,
+  active, onClick, onSettings, icon, label, meta, dimmed,
 }: {
-  active:  boolean;
-  onClick: () => void;
-  icon:    React.ReactNode;
-  label:   string;
-  meta?:   string;
-  dimmed?: boolean;
+  active:      boolean;
+  onClick:     () => void;
+  /** When provided AND the chip is active, the chip shows a ⋯ glyph and
+   *  re-tapping the active chip fires onSettings instead of onClick.
+   *  Personal chip omits this; only workspace chips have settings. */
+  onSettings?: () => void;
+  icon:        React.ReactNode;
+  label:       string;
+  meta?:       string;
+  dimmed?:     boolean;
 }) {
+  const handleClick = () => {
+    try { navigator.vibrate?.(6); } catch { /* ignore */ }
+    if (active && onSettings) onSettings();
+    else onClick();
+  };
+
+  const showSettingsHint = active && Boolean(onSettings);
+
   return (
     <button
-      onClick={() => {
-        onClick();
-        try { navigator.vibrate?.(6); } catch { /* ignore */ }
-      }}
+      onClick={handleClick}
       role="tab"
       aria-selected={active}
+      aria-label={showSettingsHint ? `${label} — open settings` : label}
       className={`flex-shrink-0 inline-flex items-center gap-1.5 rounded-full px-3.5 py-2 text-[12.5px] font-bold transition-all active:scale-[0.97] ${
         active
           ? "bg-[#9b869c] text-white shadow-[0_2px_8px_rgba(155,134,156,0.35)]"
@@ -125,6 +125,14 @@ function Chip({
         <span className={`ml-0.5 t-caption font-medium ${active ? "text-white/75" : "text-[#b0a396]"}`}>
           · {meta}
         </span>
+      )}
+      {showSettingsHint && (
+        <MoreHorizontal
+          size={13}
+          strokeWidth={2.5}
+          className="ml-1 -mr-0.5 text-white/85"
+          aria-hidden
+        />
       )}
     </button>
   );
