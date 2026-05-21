@@ -2,12 +2,15 @@
  * Share helpers — wraps LIFF shareTargetPicker (LINE) and Web Share API.
  *
  * For LINE share:
- *   - Images are sent as image messages
- *   - Other files are sent as text with the download URL
+ *   - Photos (JPEG/PNG) are sent as real image messages, so they land in the
+ *     chat as inline pictures the recipient can tap and save.
+ *   - Every file (image or not) also gets a compact Flex "link card" with an
+ *     Open button — that's the only way to deliver PDFs / docs / video / etc.,
+ *     since the LINE chat protocol has no generic "file" message type.
  *
  * For Web Share:
- *   - Uses navigator.share with files when supported (modern Chrome/Safari)
- *   - Falls back to URL-only share
+ *   - Uses navigator.share (system share menu) with a URL.
+ *   - Falls back to copying the link to the clipboard.
  */
 
 import type { FileItem } from "@/types/file";
@@ -16,20 +19,117 @@ import type { FileItem } from "@/types/file";
 // `window.liff` is declared globally in types/liff.d.ts as the full LIFF
 // SDK type, so we don't redeclare it here.
 
-// Discriminated union matches the SDK's expected message shape so each
-// pushed message is typed precisely (TextMessage or ImageMessage).
+// Discriminated union of the message shapes we send. Cast to the SDK's
+// parameter type at the call site (the SDK's Message union is stricter than
+// we need for `contents`).
 type LiffMessage =
   | { type: "text"; text: string }
-  | { type: "image"; originalContentUrl: string; previewImageUrl: string };
+  | { type: "image"; originalContentUrl: string; previewImageUrl: string }
+  | { type: "flex"; altText: string; contents: unknown };
+
+// DearFile palette — keep in sync with lib/line.ts so shared cards match the
+// product everywhere they appear.
+const BRAND_MAUVE    = "#9b869c";
+const CARD_CREAM     = "#fbfaf6";
+const TEXT_DARK_WARM = "#4a4036";
+const TEXT_TAUPE     = "#b0a396";
 
 function isImage(file: FileItem): boolean {
   return file.mimeType.startsWith("image/");
+}
+
+/**
+ * LINE image messages only accept JPEG/PNG. Other "image" types (webp, heic,
+ * gif) can't be sent as inline pictures, so they fall back to the link card.
+ */
+function isLineInlineImage(file: FileItem): boolean {
+  return file.mimeType === "image/jpeg" || file.mimeType === "image/png";
+}
+
+function fileKindLabel(file: FileItem): string {
+  if (isImage(file))                         return "🖼️ รูปภาพ / Image";
+  if (file.mimeType.startsWith("video/"))    return "🎬 วิดีโอ / Video";
+  if (file.mimeType.startsWith("audio/"))    return "🎵 เสียง / Audio";
+  if (file.mimeType === "application/pdf")   return "📄 PDF";
+  return "📎 ไฟล์ / File";
+}
+
+/** One compact Flex bubble linking to a single file. */
+function fileLinkBubble(file: FileItem): unknown {
+  return {
+    type: "bubble",
+    size: "micro",
+    styles: {
+      body:   { backgroundColor: CARD_CREAM },
+      footer: { backgroundColor: CARD_CREAM },
+    },
+    body: {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "16px",
+      spacing: "xs",
+      contents: [
+        {
+          type: "text",
+          text: file.name,
+          weight: "bold",
+          size: "sm",
+          color: TEXT_DARK_WARM,
+          wrap: true,
+          maxLines: 2,
+        },
+        {
+          type: "text",
+          text: fileKindLabel(file),
+          size: "xs",
+          color: TEXT_TAUPE,
+        },
+      ],
+    },
+    footer: {
+      type: "box",
+      layout: "vertical",
+      paddingAll: "16px",
+      paddingTop: "0px",
+      contents: [
+        {
+          type: "button",
+          style: "primary",
+          color: BRAND_MAUVE,
+          height: "sm",
+          action: { type: "uri", label: "เปิดไฟล์ / Open", uri: file.url },
+        },
+      ],
+    },
+  };
+}
+
+/** A Flex message carrying a link card per file (carousel when >1). */
+function linkCardMessage(files: FileItem[]): LiffMessage {
+  const bubbles = files.slice(0, 12).map(fileLinkBubble); // LINE carousel cap
+  const altText =
+    files.length === 1
+      ? `ไฟล์จาก DearFile: ${files[0].name}`
+      : `${files.length} ไฟล์จาก DearFile`;
+  return {
+    type: "flex",
+    altText,
+    contents:
+      bubbles.length === 1
+        ? bubbles[0]
+        : { type: "carousel", contents: bubbles },
+  };
 }
 
 // ── LINE share ────────────────────────────────────────────────────────────────
 
 /**
  * Returns true if LINE share is available in the current LIFF environment.
+ *
+ * Note: shareTargetPicker must be enabled per-channel in the LINE Developers
+ * Console (LIFF tab → shareTargetPicker → accept agreement → Enable) AND the
+ * app must be opened inside the LINE client — otherwise isApiAvailable is
+ * false and we hide the button.
  */
 export function canShareToLine(): boolean {
   if (typeof window === "undefined") return false;
@@ -43,38 +143,29 @@ export async function shareToLine(files: FileItem[]): Promise<"success" | "cance
   if (!canShareToLine() || files.length === 0) return "error";
   const liff = window.liff!;
 
-  // Build message list — images become image messages, others get a text message
+  // Photos go first as inline image messages; everything is then covered by a
+  // single link-card (carousel) message so PDFs/docs/video/etc. are reachable.
   const messages: LiffMessage[] = [];
-  const nonImages: FileItem[] = [];
 
   for (const file of files) {
-    if (isImage(file)) {
+    if (isLineInlineImage(file)) {
       messages.push({
         type: "image",
         originalContentUrl: file.url,
         previewImageUrl:    file.url,
       });
-    } else {
-      nonImages.push(file);
     }
   }
 
-  // Combine non-images into a single text message
-  if (nonImages.length > 0) {
-    const lines = nonImages.map((f) => `📄 ${f.name}\n${f.url}`).join("\n\n");
-    messages.push({
-      type: "text",
-      text: nonImages.length === 1
-        ? lines
-        : `Sharing ${nonImages.length} files:\n\n${lines}`,
-    });
-  }
-
-  // LIFF caps at 5 messages per share — slice if needed
-  const truncated = messages.slice(0, 5);
+  // LIFF caps a share at 5 messages — keep room for the link card.
+  const imageMessages = messages.slice(0, 4);
+  const finalMessages: LiffMessage[] = [...imageMessages, linkCardMessage(files)];
 
   try {
-    const res = await liff.shareTargetPicker!(truncated);
+    // The SDK's Message union types `contents` more strictly than we model it.
+    const res = await liff.shareTargetPicker!(
+      finalMessages as unknown as Parameters<NonNullable<typeof liff.shareTargetPicker>>[0],
+    );
     return res?.status === "success" ? "success" : "cancelled";
   } catch (err) {
     console.error("[shareToLine] failed:", err);
