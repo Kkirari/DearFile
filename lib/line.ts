@@ -210,41 +210,41 @@ export function welcomeBubble(liffUrl: string): LineFlexMessage {
 }
 
 /**
- * Confirmation bubble shown after a chat-uploaded file lands in S3 (and,
- * when possible, gets renamed + categorized by the analyzer).
+ * Compact confirmation bubble shown after a chat-uploaded file lands in S3.
  *
- * `workspaceName` is set when the file landed in a shared workspace; it
- * shows above the folder row so members know which shared space it joined.
+ * Deliberately minimal — a `micro` bubble with just a ✓ + filename, one muted
+ * folder line, and an Open button — so it barely takes any room in a busy chat.
+ * `opts.liffUrl` is a deep link that opens the saved file directly in the LIFF
+ * app (built by the webhook). `workspaceName` is set for shared-workspace saves
+ * and is shown alongside the folder so members see which space it joined.
  */
 export interface UploadSuccessOpts {
   filename: string;
   folderName: string;
   liffUrl: string;
-  detail?: string;
-  analyzed: boolean;
   workspaceName?: string;
 }
 
 export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
-  const statusLabel = opts.analyzed ? "AI ORGANIZED" : "SAVED";
+  const folderLine = opts.workspaceName
+    ? `👥 ${opts.workspaceName} · 📁 ${opts.folderName}`
+    : `📁 ${opts.folderName}`;
 
   return {
     type: "flex",
     altText: `บันทึก ${opts.filename} แล้ว / Saved ${opts.filename}`,
     contents: {
       type: "bubble",
-      size: "kilo",
+      size: "micro",
       styles: {
-        header: { backgroundColor: BRAND_MAUVE },
         body:   { backgroundColor: CARD_CREAM },
         footer: { backgroundColor: CARD_CREAM },
       },
-      header: {
+      body: {
         type: "box",
         layout: "vertical",
-        paddingAll: "20px",
-        paddingBottom: "16px",
-        spacing: "xs",
+        paddingAll: "16px",
+        spacing: "sm",
         contents: [
           {
             type: "box",
@@ -254,97 +254,28 @@ export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
               {
                 type: "text",
                 text: "✓",
-                color: "#FFFFFF",
+                color: BRAND_MAUVE,
                 weight: "bold",
-                size: "md",
-                flex: 0,
-              },
-              {
-                type: "text",
-                text: statusLabel,
-                color: "#FFFFFF",
-                weight: "bold",
-                size: "xs",
-                flex: 0,
-              },
-            ],
-          },
-          {
-            type: "text",
-            text: "DearFile",
-            weight: "bold",
-            color: "#FFFFFF",
-            size: "xl",
-          },
-        ],
-      },
-      body: {
-        type: "box",
-        layout: "vertical",
-        paddingAll: "20px",
-        spacing: "md",
-        contents: [
-          {
-            type: "text",
-            text: opts.filename,
-            weight: "bold",
-            size: "md",
-            color: TEXT_DARK_WARM,
-            wrap: true,
-          },
-          ...(opts.detail
-            ? [
-                {
-                  type: "text",
-                  text: opts.detail,
-                  size: "xs",
-                  color: TEXT_TAUPE,
-                  wrap: true,
-                },
-              ]
-            : []),
-          {
-            type: "separator",
-            margin: "md",
-            color: BORDER_BEIGE,
-          },
-          ...(opts.workspaceName
-            ? [
-                {
-                  type: "box",
-                  layout: "baseline",
-                  spacing: "sm",
-                  margin: "md",
-                  contents: [
-                    { type: "text", text: "👥", flex: 0, size: "sm" },
-                    {
-                      type: "text",
-                      text: opts.workspaceName,
-                      size: "sm",
-                      color: BRAND_MAUVE,
-                      weight: "bold",
-                      flex: 0,
-                    },
-                  ],
-                },
-              ]
-            : []),
-          {
-            type: "box",
-            layout: "baseline",
-            spacing: "sm",
-            margin: opts.workspaceName ? "sm" : "md",
-            contents: [
-              { type: "text", text: "📁", flex: 0, size: "sm" },
-              {
-                type: "text",
-                text: opts.folderName,
                 size: "sm",
-                color: TEXT_TAUPE,
-                weight: "bold",
                 flex: 0,
               },
+              {
+                type: "text",
+                text: opts.filename,
+                weight: "bold",
+                size: "sm",
+                color: TEXT_DARK_WARM,
+                flex: 1,
+                wrap: true,
+              },
             ],
+          },
+          {
+            type: "text",
+            text: folderLine,
+            size: "xs",
+            color: TEXT_TAUPE,
+            wrap: true,
           },
         ],
       },
@@ -361,7 +292,7 @@ export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
             height: "sm",
             action: {
               type: "uri",
-              label: "เปิด DearFile / Open",
+              label: "เปิด / Open",
               uri: opts.liffUrl,
             },
           },

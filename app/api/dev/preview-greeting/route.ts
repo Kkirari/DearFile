@@ -29,11 +29,10 @@ export async function GET(req: Request) {
   const message =
     which === "success"
       ? uploadSuccessBubble({
-          filename:   "receipt_starbucks_18-5-26.pdf",
-          folderName: "🧾 Receipts",
+          filename:      "receipt_starbucks_18-5-26.pdf",
+          folderName:    "🧾 Receipts",
           liffUrl,
-          detail:     "Coffee receipt — Starbucks, 245 THB",
-          analyzed:   true,
+          workspaceName: "Team Finance",
         })
       : which === "help"
       ? helpBubble(liffUrl)

@@ -1,15 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Home, Search, FolderOpen, User } from "lucide-react";
 import { HomeTab } from "@/components/screens/home-tab";
 import { FoldersTab } from "@/components/screens/folders-tab";
 import { ProfileTab } from "@/components/screens/profile-tab";
 import { SearchScreen } from "@/components/screens/search-screen";
+import { FileDetailSheet } from "@/components/file-detail-sheet";
+import { ImageLightbox } from "@/components/image-lightbox";
 import { UploadFab } from "@/components/upload-fab";
 import { useFiles } from "@/hooks/use-files";
 import { useFolders } from "@/hooks/use-folders";
 import { useLanguage } from "@/providers/language-provider";
+import { useWorkspace } from "@/providers/workspace-provider";
+import { apiFetch } from "@/lib/api-client";
+import type { FileItem } from "@/types/file";
 
 type NavId = "home" | "search" | "folders" | "profile";
 
@@ -24,9 +29,49 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
   // returns there instead of always going to home.
   const [searchOrigin, setSearchOrigin] = useState<NavId>("home");
 
+  const { setCurrentWorkspace } = useWorkspace();
+
   // All files across inbox + every folder — used for Recent and unsorted count
   const { files, loading: filesLoading, refresh: refreshFiles } = useFiles("all");
   const { folders, loading: foldersLoading, refresh: refreshFolders } = useFolders();
+
+  // ── Deep link from the LINE save-card "Open" button ──────────────────────
+  // The bot builds `?file=<key>[&ws=<id>]`; LIFF forwards it here. On first
+  // mount we set the right workspace scope, resolve the file, and open its
+  // detail sheet — landing the user straight on the file they just saved.
+  const [deepLinkFile, setDeepLinkFile]         = useState<FileItem | null>(null);
+  const [deepLinkLightbox, setDeepLinkLightbox] = useState<FileItem | null>(null);
+  const deepLinkHandled = useRef(false);
+
+  useEffect(() => {
+    if (deepLinkHandled.current) return;
+    deepLinkHandled.current = true;
+
+    const params  = new URLSearchParams(window.location.search);
+    const fileKey = params.get("file");
+    const ws      = params.get("ws");
+    if (!fileKey) return;
+
+    if (ws) setCurrentWorkspace(ws);
+
+    // Clear the params so a refresh / re-render doesn't reopen the sheet.
+    window.history.replaceState(null, "", window.location.pathname);
+
+    const url = ws
+      ? `/api/files/one?key=${encodeURIComponent(fileKey)}&workspaceId=${encodeURIComponent(ws)}`
+      : `/api/files/one?key=${encodeURIComponent(fileKey)}`;
+
+    (async () => {
+      try {
+        const res = await apiFetch(url);
+        if (!res.ok) return; // deleted / no access → just boot to home
+        const { file } = await res.json() as { file: FileItem };
+        setDeepLinkFile(file);
+      } catch {
+        /* network hiccup → boot to home, no error */
+      }
+    })();
+  }, [setCurrentWorkspace]);
 
   // Per-user layout: keys are users/{userId}/uploads/... so match the
   // segment, not a startsWith.
@@ -138,6 +183,25 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
           );
         })}
       </nav>
+
+      {/* ── DEEP-LINK FILE (from the LINE save-card) ── */}
+      {deepLinkFile && (
+        <FileDetailSheet
+          file={deepLinkFile}
+          folders={folders}
+          onClose={() => setDeepLinkFile(null)}
+          onOpenLightbox={() => setDeepLinkLightbox(deepLinkFile)}
+          onDeleted={() => { setDeepLinkFile(null); refreshFiles(); refreshFolders(); }}
+          onMoved={() => { setDeepLinkFile(null); refreshFiles(); refreshFolders(); }}
+        />
+      )}
+      {deepLinkLightbox && (
+        <ImageLightbox
+          src={deepLinkLightbox.url}
+          name={deepLinkLightbox.name}
+          onClose={() => setDeepLinkLightbox(null)}
+        />
+      )}
     </div>
   );
 }
