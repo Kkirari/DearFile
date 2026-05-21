@@ -1,15 +1,18 @@
 import { GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { s3, BUCKET } from "@/lib/s3";
+import { s3, BUCKET, isSafeWorkspaceId } from "@/lib/s3";
 import {
   searchScored,
+  searchWorkspaceScored,
   countByFilter,
+  countWorkspaceByFilter,
   type FilterMode,
   type SortMode,
   type ScoredEntry,
 } from "@/lib/search-index";
 import type { FileItem } from "@/types/file";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
+import { requireWorkspaceAccess } from "@/lib/workspace";
 
 export interface SearchResultItem extends FileItem {
   score: number;
@@ -41,14 +44,30 @@ export async function GET(req: Request) {
     const q      = (searchParams.get("q") ?? "").trim();
     const filter = asFilter(searchParams.get("filter"));
     const sort   = asSort(searchParams.get("sort"));
+    const workspaceId = searchParams.get("workspaceId");
+
+    // Resolve scope: workspace (membership-gated) or personal.
+    let wsId: string | null = null;
+    if (workspaceId !== null && workspaceId !== "") {
+      if (!isSafeWorkspaceId(workspaceId)) {
+        return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
+      }
+      await requireWorkspaceAccess(userId, workspaceId);
+      wsId = workspaceId;
+    }
+
+    const getCounts = () =>
+      wsId ? countWorkspaceByFilter(wsId) : countByFilter(userId);
 
     // Empty query + no active filter → return empty (UI shows recent/suggestions instead)
     if (!q && filter === "all") {
-      const counts = await countByFilter(userId);
+      const counts = await getCounts();
       return Response.json({ files: [], query: "", counts });
     }
 
-    const entries = await searchScored(userId, q, { filter, sort });
+    const entries = wsId
+      ? await searchWorkspaceScored(wsId, q, { filter, sort })
+      : await searchScored(userId, q, { filter, sort });
 
     const files: SearchResultItem[] = await Promise.all(
       entries.map(async (e: ScoredEntry) => {
@@ -72,7 +91,7 @@ export async function GET(req: Request) {
       })
     );
 
-    const counts = await countByFilter(userId);
+    const counts = await getCounts();
 
     return Response.json({
       files,
@@ -83,6 +102,7 @@ export async function GET(req: Request) {
       counts, // category counts for filter chip badges
     });
   } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
     const message = err instanceof Error ? err.message : String(err);
     console.error("[GET /api/search]", message);
     return Response.json({ error: message }, { status: 500 });

@@ -20,6 +20,7 @@ import {
 import { FileDetailSheet } from "@/components/file-detail-sheet";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { useLanguage } from "@/providers/language-provider";
+import { useWorkspace, withWorkspace } from "@/providers/workspace-provider";
 import { formatBytes, getFileIcon } from "@/lib/utils";
 import type { FileItem } from "@/types/file";
 import type { FolderItem } from "@/types/folder";
@@ -81,6 +82,7 @@ interface SearchScreenProps {
 
 export function SearchScreen({ onBack, folders }: SearchScreenProps) {
   const { lang, tr } = useLanguage();
+  const { currentWorkspaceId } = useWorkspace();
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Search state
@@ -148,7 +150,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
     }
     let cancelled = false;
     const t = setTimeout(() => {
-      apiFetch(`/api/search/suggest?q=${encodeURIComponent(query.trim())}`)
+      apiFetch(withWorkspace(`/api/search/suggest?q=${encodeURIComponent(query.trim())}`, currentWorkspaceId))
         .then((r) => r.json())
         .then((data: { suggestions?: string[] }) => {
           if (!cancelled) setSuggestions(data.suggestions ?? []);
@@ -156,7 +158,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
         .catch(() => { if (!cancelled) setSuggestions([]); });
     }, SUGGEST_DEBOUNCE);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [query, showSuggest]);
+  }, [query, showSuggest, currentWorkspaceId]);
 
   // Main search fetch
   useEffect(() => {
@@ -165,7 +167,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
       setResults([]);
       setViewState("idle");
       // Still fetch counts so chips have badges
-      apiFetch("/api/search?q=").then((r) => r.json())
+      apiFetch(withWorkspace("/api/search?q=", currentWorkspaceId)).then((r) => r.json())
         .then((d: { counts?: Record<FilterMode, number> }) => {
           if (d.counts) setCounts(d.counts);
         }).catch(() => {});
@@ -179,7 +181,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
       filter,
       sort,
     });
-    apiFetch(`/api/search?${params}`)
+    apiFetch(withWorkspace(`/api/search?${params}`, currentWorkspaceId))
       .then((r) => r.json())
       .then((data: { files?: SearchFile[]; counts?: Record<FilterMode, number> }) => {
         if (cancelled) return;
@@ -191,7 +193,7 @@ export function SearchScreen({ onBack, folders }: SearchScreenProps) {
       })
       .catch(console.error);
     return () => { cancelled = true; };
-  }, [debouncedQuery, filter, sort]);
+  }, [debouncedQuery, filter, sort, currentWorkspaceId]);
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 

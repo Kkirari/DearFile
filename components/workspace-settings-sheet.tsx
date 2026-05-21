@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { apiFetch } from "@/lib/api-client";
 import { useWorkspace, type WorkspaceSummary } from "@/providers/workspace-provider";
+import { useLiff } from "@/providers/liff-provider";
 
 interface WorkspaceSettingsSheetProps {
   workspace: WorkspaceSummary;
@@ -33,6 +34,8 @@ interface MemberView {
   userId: string;
   role: "owner" | "member";
   joinedAt: string;
+  displayName?: string;
+  pictureUrl?: string;
 }
 
 interface InviteView {
@@ -59,6 +62,8 @@ function inviteUrl(token: string): string {
 
 export function WorkspaceSettingsSheet({ workspace, onClose }: WorkspaceSettingsSheetProps) {
   const { refresh, setCurrentWorkspace } = useWorkspace();
+  const { profile } = useLiff();
+  const myUserId = profile?.userId ?? null;
   const [isClosing, setIsClosing] = useState(false);
   const [members, setMembers]     = useState<MemberView[] | null>(null);
   const [invites, setInvites]     = useState<InviteView[] | null>(null);
@@ -80,16 +85,16 @@ export function WorkspaceSettingsSheet({ workspace, onClose }: WorkspaceSettings
   const loadAll = useCallback(async () => {
     setError(null);
     try {
-      // Members come from the workspace meta. We don't have a dedicated
-      // endpoint, but the meta is loaded by GET /api/workspaces (count
-      // only) — to get the full member list we need a separate call.
-      // For now, ask /api/workspaces to refresh and pull the count;
-      // member detail comes from a small additional GET we'll add to
-      // workspaces/[id] if Phase 3 needs it. For v1 we render an
-      // approximate list using the user's own id + memberCount placeholder.
+      // Members — resolved with LINE display names + avatars server-side.
+      const memRes = await apiFetch(`/api/workspaces/${workspace.id}/members`);
+      if (memRes.ok) {
+        const data = await memRes.json() as { members?: MemberView[] };
+        setMembers(data.members ?? []);
+      } else {
+        setMembers([]);
+      }
 
-      // Workaround for v1: list invites (owner only) and render an
-      // approximation of members from workspace.memberCount.
+      // Invites are owner-only.
       if (isOwner) {
         const res = await apiFetch(`/api/workspaces/${workspace.id}/invites`);
         if (res.ok) {
@@ -101,16 +106,34 @@ export function WorkspaceSettingsSheet({ workspace, onClose }: WorkspaceSettings
       } else {
         setInvites([]);
       }
-
-      // Render a single "you" entry plus the implied member count. A
-      // proper member list endpoint is a Phase 3 addition.
-      setMembers([]);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     }
   }, [workspace.id, isOwner]);
 
   useEffect(() => { loadAll(); }, [loadAll]);
+
+  // ── Remove member (owner only) ───────────────────────────────────────
+
+  async function removeMember(targetId: string) {
+    setBusy(`remove-${targetId}`);
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/workspaces/${workspace.id}/members/${targetId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error ?? `Remove failed (${res.status})`);
+      }
+      setMembers((prev) => prev?.filter((m) => m.userId !== targetId) ?? null);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Remove failed");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   // ── Rename ─────────────────────────────────────────────────────────
 
@@ -245,6 +268,32 @@ export function WorkspaceSettingsSheet({ workspace, onClose }: WorkspaceSettings
       close();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Leave failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // ── Delete workspace (owner only, irreversible) ──────────────────────
+
+  async function deleteWorkspace() {
+    if (!isOwner) return;
+    if (!window.confirm(
+      `Delete "${workspace.name}" for everyone? All files in this workspace will be permanently removed. This cannot be undone.`,
+    )) return;
+
+    setBusy("delete");
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/workspaces/${workspace.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error ?? `Delete failed (${res.status})`);
+      }
+      await refresh();
+      setCurrentWorkspace(null);
+      close();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Delete failed");
     } finally {
       setBusy(null);
     }
@@ -395,23 +444,75 @@ export function WorkspaceSettingsSheet({ workspace, onClose }: WorkspaceSettings
           </section>
         )}
 
-        {/* Members preview — v1 shows count only */}
+        {/* Members */}
         <section className="mb-5">
           <h4 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
-            Members ({workspace.memberCount})
+            Members ({members?.length ?? workspace.memberCount})
           </h4>
-          <p className="text-[12px] text-[#b0a396] dark:text-[#6e6460] leading-relaxed">
-            Member display names will be shown in a future update. Owners can remove members from there too.
-            {members && members.length > 0 && (
-              <span className="mt-2 block">
-                {members.map((m) => shortUserId(m.userId)).join(", ")}
-              </span>
-            )}
-          </p>
+          {members === null ? (
+            <p className="text-[12px] text-[#b0a396]">Loading…</p>
+          ) : members.length === 0 ? (
+            <p className="text-[12px] text-[#b0a396] dark:text-[#6e6460]">No members found.</p>
+          ) : (
+            <ul className="flex flex-col gap-1.5">
+              {members.map((m) => {
+                const isYou   = myUserId !== null && m.userId === myUserId;
+                const name    = m.displayName ?? shortUserId(m.userId);
+                const removing = busy === `remove-${m.userId}`;
+                return (
+                  <li
+                    key={m.userId}
+                    className="flex items-center gap-3 rounded-2xl border border-[#e0d8cc] dark:border-[#3a3430] bg-[#f4f3ee]/50 dark:bg-[#2a2724]/50 px-3 py-2.5"
+                  >
+                    {m.pictureUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={m.pictureUrl}
+                        alt={name}
+                        className="h-9 w-9 flex-shrink-0 rounded-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-[#9b869c]/15 text-[13px] font-bold text-[#9b869c]">
+                        {name.slice(0, 1).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[13px] font-semibold text-[#4a4036] dark:text-[#e8ddd4]">
+                        {name}
+                        {isYou && <span className="ml-1.5 text-[11px] font-medium text-[#9b869c]">(You)</span>}
+                      </p>
+                      <p className="text-[11px] text-[#b0a396] dark:text-[#6e6460]">
+                        {m.role === "owner" ? "Owner" : "Member"}
+                      </p>
+                    </div>
+                    {isOwner && m.role !== "owner" && (
+                      <button
+                        onClick={() => removeMember(m.userId)}
+                        disabled={removing}
+                        aria-label={`Remove ${name}`}
+                        className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl bg-[#f4f3ee] dark:bg-[#2a2724] text-red-500 active:bg-red-50 disabled:opacity-50"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
         </section>
 
-        {/* Leave */}
-        {!isOwner && (
+        {/* Leave (member) / Delete (owner) */}
+        {isOwner ? (
+          <button
+            onClick={deleteWorkspace}
+            disabled={busy === "delete"}
+            className="flex w-full items-center justify-center gap-2 rounded-2xl border border-red-200 dark:border-red-900/40 bg-red-50/50 dark:bg-red-950/20 py-3 text-[13px] font-bold text-red-600 dark:text-red-400 active:bg-red-100 dark:active:bg-red-950/40 disabled:opacity-50"
+          >
+            <Trash2 size={14} strokeWidth={2.25} />
+            {busy === "delete" ? "Deleting…" : "Delete workspace"}
+          </button>
+        ) : (
           <button
             onClick={leaveWorkspace}
             disabled={busy === "leave"}

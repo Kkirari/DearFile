@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { apiFetch } from "@/lib/api-client";
+import { useWorkspace, withWorkspace } from "@/providers/workspace-provider";
 
 export interface FolderPreviewItem {
   url: string;
@@ -21,13 +22,14 @@ export type PreviewsMap = Record<string, FolderPreview>;
  * Auto-refreshes when the `key` prop changes (e.g. after upload/delete).
  */
 export function useFolderPreviews(refreshKey: number | string = 0) {
+  const { currentWorkspaceId } = useWorkspace();
   const [previews, setPreviews] = useState<PreviewsMap>({});
   const [loading, setLoading]   = useState(true);
 
   const fetchPreviews = useCallback(async () => {
     try {
       setLoading(true);
-      const res  = await apiFetch("/api/folders/previews");
+      const res  = await apiFetch(withWorkspace("/api/folders/previews", currentWorkspaceId));
       const data = await res.json() as { previews?: PreviewsMap };
       setPreviews(data.previews ?? {});
     } catch (err) {
@@ -35,7 +37,7 @@ export function useFolderPreviews(refreshKey: number | string = 0) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [currentWorkspaceId]);
 
   useEffect(() => {
     fetchPreviews();
