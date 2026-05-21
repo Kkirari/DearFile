@@ -13,7 +13,8 @@ import {
   workspaceFolderPrefix,
 } from "@/lib/s3";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
-import { requireWorkspaceAccess } from "@/lib/workspace";
+import { requireWorkspaceAccess, getFolderPermission } from "@/lib/workspace";
+import { canUploadToFolder } from "@/lib/folder-permissions";
 
 const ALLOWED_EXTENSIONS = new Set([
   "pdf",  "txt",
@@ -74,10 +75,24 @@ export async function POST(req: Request) {
       if (!isSafeWorkspaceId(workspaceId)) {
         return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
       }
-      await requireWorkspaceAccess(userId, workspaceId);
+      const member = await requireWorkspaceAccess(userId, workspaceId);
 
       if (safeFolderId && !(await workspaceFolderMetaExists(workspaceId, safeFolderId))) {
         return Response.json({ error: "Target folder does not exist in this workspace" }, { status: 404 });
+      }
+
+      // Phase 3: read-only folders reject member uploads. Owner is
+      // always allowed. Inbox uploads (no folderId) behave like `upload`,
+      // so no check is needed there — anyone in the workspace can drop
+      // files in the inbox.
+      if (safeFolderId) {
+        const mode = await getFolderPermission(workspaceId, safeFolderId);
+        if (!canUploadToFolder(mode, member.role === "owner")) {
+          return Response.json(
+            { error: "This folder is read-only" },
+            { status: 403 },
+          );
+        }
       }
 
       key = safeFolderId

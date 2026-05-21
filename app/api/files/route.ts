@@ -22,7 +22,8 @@ import {
   removeWorkspaceEntry,
 } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
-import { requireWorkspaceAccess } from "@/lib/workspace";
+import { requireWorkspaceAccess, getFolderPermission } from "@/lib/workspace";
+import { canDeleteFileInFolder } from "@/lib/folder-permissions";
 import { invalidatePreviews } from "@/lib/previews-cache";
 
 /**
@@ -194,15 +195,39 @@ export async function DELETE(req: Request) {
         );
       }
 
-      // Members can only delete their own uploads; owners can delete anything.
-      // Uploader is recorded on the workspace search-index entry, so check it
-      // before we drop the S3 object.
+      // Owners can delete anything. For members the rules depend on the
+      // *folder mode* the owner set (Phase 3):
+      //   read-only → no deletes
+      //   upload    → only files the member uploaded themselves
+      //   full      → anything in the folder
+      // Workspace inbox files (no folder id in the key) behave like upload.
+      //
+      // Missing `uploaderId` on the index entry now denies for members —
+      // closes the pre-Phase-3 bug where legacy/unindexed entries were
+      // deletable by anyone.
       if (member.role !== "owner") {
+        const rest = (key as string).slice(`workspaces/${workspaceId}/`.length);
+        let folderId: string | null = null;
+        if (rest.startsWith("folders/")) {
+          const slash = rest.indexOf("/", "folders/".length);
+          if (slash > "folders/".length) {
+            folderId = rest.slice("folders/".length, slash);
+          }
+        }
+
+        const mode = folderId
+          ? await getFolderPermission(workspaceId, folderId)
+          : "upload" as const;
+
         const { getAllWorkspaceEntries } = await import("@/lib/search-index");
         const entries = await getAllWorkspaceEntries(workspaceId);
         const entry = entries.find((e) => e.key === key);
-        if (entry && entry.uploaderId && entry.uploaderId !== userId) {
-          return Response.json({ error: "Only the uploader or owner can delete this file" }, { status: 403 });
+
+        if (!canDeleteFileInFolder(mode, false, entry?.uploaderId, userId)) {
+          return Response.json(
+            { error: "You don't have permission to delete this file" },
+            { status: 403 },
+          );
         }
       }
 

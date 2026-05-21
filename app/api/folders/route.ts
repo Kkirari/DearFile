@@ -26,8 +26,14 @@ import {
   removeWorkspaceEntriesByFolderId,
 } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
-import { requireWorkspaceAccess } from "@/lib/workspace";
+import { requireWorkspaceAccess, type WorkspaceMember } from "@/lib/workspace";
 import { invalidatePreviews } from "@/lib/previews-cache";
+import {
+  type FolderMode,
+  DEFAULT_FOLDER_MODE,
+  isFolderMode,
+  canChangeFolderMode,
+} from "@/lib/folder-permissions";
 
 /**
  * Per-route scope helper. If `?workspaceId=` or `workspaceId` body field is
@@ -39,7 +45,7 @@ import { invalidatePreviews } from "@/lib/previews-cache";
  */
 type Scope =
   | { kind: "user"; userId: string }
-  | { kind: "workspace"; userId: string; workspaceId: string };
+  | { kind: "workspace"; userId: string; workspaceId: string; member: WorkspaceMember };
 
 async function resolveScope(
   userId: string,
@@ -51,8 +57,8 @@ async function resolveScope(
   if (!isSafeWorkspaceId(workspaceIdInput)) {
     throw new AuthError(400, "Invalid workspaceId");
   }
-  await requireWorkspaceAccess(userId, workspaceIdInput);
-  return { kind: "workspace", userId, workspaceId: workspaceIdInput };
+  const member = await requireWorkspaceAccess(userId, workspaceIdInput);
+  return { kind: "workspace", userId, workspaceId: workspaceIdInput, member };
 }
 
 export async function GET(req: Request) {
@@ -83,13 +89,18 @@ export async function GET(req: Request) {
         const body = await res.Body?.transformToString();
         let meta: Record<string, unknown> = {};
         try { meta = JSON.parse(body ?? "{}"); } catch { meta = {}; }
-        return {
+        const item: FolderItem = {
           id:        meta.id as string,
           name:      meta.name as string,
           count:     0,
           updatedAt: (meta.createdAt as string) ?? new Date().toISOString(),
           owner:     "user",
-        } satisfies FolderItem;
+        };
+        if (scope.kind === "workspace") {
+          const permissions = meta.permissions as { mode?: unknown } | undefined;
+          item.mode = isFolderMode(permissions?.mode) ? permissions!.mode as FolderMode : DEFAULT_FOLDER_MODE;
+        }
+        return item;
       }),
     );
 
@@ -134,19 +145,43 @@ export async function POST(req: Request) {
   }
 
   try {
-    const { name, workspaceId } = await req.json() as {
+    const { name, workspaceId, mode } = await req.json() as {
       name?: unknown;
       workspaceId?: unknown;
+      mode?: unknown;
     };
     if (typeof name !== "string" || name.trim().length === 0 || name.length > 100) {
       return Response.json({ error: "Invalid name (1-100 chars)" }, { status: 400 });
+    }
+    if (mode !== undefined && mode !== null && !isFolderMode(mode)) {
+      return Response.json({ error: "Invalid mode" }, { status: 400 });
     }
 
     const scope = await resolveScope(userId, workspaceId);
     const owner: "user" = "user";
     const id        = crypto.randomUUID();
     const createdAt = new Date().toISOString();
-    const meta      = { id, name: name.trim(), owner, createdAt, createdBy: userId };
+
+    // Determine the persisted mode. Only workspace owners can pick a
+    // non-default mode on create; everyone else (members, personal scope)
+    // gets `upload`. We persist the field on every workspace folder so the
+    // shape is consistent and `getFolderPermission` doesn't have to guess
+    // between "legacy folder" and "owner explicitly chose upload".
+    let folderMode: FolderMode = DEFAULT_FOLDER_MODE;
+    if (scope.kind === "workspace" && isFolderMode(mode) && scope.member.role === "owner") {
+      folderMode = mode;
+    }
+
+    const meta: Record<string, unknown> = {
+      id,
+      name: name.trim(),
+      owner,
+      createdAt,
+      createdBy: userId,
+    };
+    if (scope.kind === "workspace") {
+      meta.permissions = { mode: folderMode };
+    }
 
     const key = scope.kind === "workspace"
       ? workspaceFolderMetaKey(scope.workspaceId, id)
@@ -161,9 +196,16 @@ export async function POST(req: Request) {
 
     if (scope.kind === "user") invalidatePreviews(userId);
 
-    return Response.json({
-      folder: { id, name: meta.name, count: 0, updatedAt: createdAt, owner } satisfies FolderItem,
-    });
+    const folderItem: FolderItem = {
+      id,
+      name: name.trim(),
+      count: 0,
+      updatedAt: createdAt,
+      owner,
+    };
+    if (scope.kind === "workspace") folderItem.mode = folderMode;
+
+    return Response.json({ folder: folderItem });
   } catch (err) {
     if (err instanceof AuthError) return authErrorResponse(err);
     const message = err instanceof Error ? err.message : String(err);
@@ -182,20 +224,48 @@ export async function PATCH(req: Request) {
   }
 
   try {
-    const { id, name, workspaceId } = await req.json() as {
+    const { id, name, mode, workspaceId } = await req.json() as {
       id?: unknown;
       name?: unknown;
+      mode?: unknown;
       workspaceId?: unknown;
     };
 
     if (typeof id !== "string" || !/^[a-zA-Z0-9_-]+$/.test(id)) {
       return Response.json({ error: "Invalid id" }, { status: 400 });
     }
-    if (typeof name !== "string" || name.trim().length === 0 || name.length > 100) {
+
+    const hasName = name !== undefined && name !== null;
+    const hasMode = mode !== undefined && mode !== null;
+
+    if (hasName && (typeof name !== "string" || name.trim().length === 0 || name.length > 100)) {
       return Response.json({ error: "Invalid name (1-100 chars)" }, { status: 400 });
+    }
+    if (hasMode && !isFolderMode(mode)) {
+      return Response.json({ error: "Invalid mode" }, { status: 400 });
+    }
+    if (!hasName && !hasMode) {
+      return Response.json({ error: "Provide name or mode" }, { status: 400 });
     }
 
     const scope = await resolveScope(userId, workspaceId);
+
+    // Mode changes are owner-only and only meaningful in a workspace.
+    if (hasMode) {
+      if (scope.kind !== "workspace") {
+        return Response.json(
+          { error: "Folder mode is only valid inside a workspace" },
+          { status: 400 },
+        );
+      }
+      if (!canChangeFolderMode(scope.member.role === "owner")) {
+        return Response.json(
+          { error: "Only the workspace owner can change folder permissions" },
+          { status: 403 },
+        );
+      }
+    }
+
     const key = scope.kind === "workspace"
       ? workspaceFolderMetaKey(scope.workspaceId, id)
       : userFolderMetaKey(userId, id);
@@ -210,7 +280,9 @@ export async function PATCH(req: Request) {
     } catch {
       return Response.json({ error: "Folder metadata is corrupted" }, { status: 422 });
     }
-    meta.name = name.trim();
+
+    if (hasName) meta.name = (name as string).trim();
+    if (hasMode) meta.permissions = { ...(meta.permissions as object ?? {}), mode };
 
     await s3.send(new PutObjectCommand({
       Bucket:      BUCKET,
@@ -253,8 +325,8 @@ export async function DELETE(req: Request) {
       if (!isSafeWorkspaceId(workspaceId)) {
         return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
       }
-      await requireWorkspaceAccess(userId, workspaceId, "owner");
-      scope = { kind: "workspace", userId, workspaceId };
+      const member = await requireWorkspaceAccess(userId, workspaceId, "owner");
+      scope = { kind: "workspace", userId, workspaceId, member };
     } else {
       scope = { kind: "user", userId };
     }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Folder, Sparkles, MoreHorizontal, Pin } from "lucide-react";
+import { Folder, Sparkles, MoreHorizontal, Pin, Lock, Unlock } from "lucide-react";
 import {
   isPinned as isPinnedPref,
   getFolderColor,
@@ -106,8 +106,14 @@ export function FolderCard({ folder, index = 0, preview, prefsVersion = 0, onCli
       <p className="text-[14px] font-bold leading-tight text-[#4a4036] dark:text-[#e8ddd4] line-clamp-2">
         {folder.name}
       </p>
-      <p className="mt-1 text-[11px] text-[#b0a396] dark:text-[#6e6460]">
-        {fileCount} {fileCount === 1 ? "file" : "files"} · {timeAgo(folder.updatedAt)}
+      <p className="mt-1 flex items-center gap-1 text-[11px] text-[#b0a396] dark:text-[#6e6460]">
+        {folder.mode === "read-only" && (
+          <Lock size={10} strokeWidth={2.5} aria-label="Read-only folder" />
+        )}
+        {folder.mode === "full" && (
+          <Unlock size={10} strokeWidth={2.5} aria-label="Full-access folder" />
+        )}
+        <span>{fileCount} {fileCount === 1 ? "file" : "files"} · {timeAgo(folder.updatedAt)}</span>
       </p>
     </div>
   );
