@@ -184,9 +184,19 @@ async function shouldSkipEvent(event: LineEvent): Promise<boolean> {
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
-function liffUrl(): string {
+/**
+ * Build a LIFF URL. With no args it opens the app home; pass `file` (an S3
+ * key) and optionally `ws` (workspace id) to deep-link straight to that file —
+ * LIFF forwards the query to the endpoint, where home-screen.tsx reads it.
+ */
+function liffUrl(params?: { file?: string; ws?: string }): string {
   const id = process.env.NEXT_PUBLIC_LIFF_ID;
-  return id ? `https://liff.line.me/${id}` : "https://line.me";
+  const base = id ? `https://liff.line.me/${id}` : "https://line.me";
+  if (!params?.file && !params?.ws) return base;
+  const qs = new URLSearchParams();
+  if (params.file) qs.set("file", params.file);
+  if (params.ws)   qs.set("ws", params.ws);
+  return `${base}?${qs.toString()}`;
 }
 
 function extFromContentType(contentType: string): string | null {
@@ -263,15 +273,12 @@ async function handlePersonalFileMessage(
 
   let finalKey = initialKey;
   let finalFilename = filename;
-  let analyzed = false;
-  let detail: string | undefined;
   let aiFolderId = "ai-docs-general";
 
   if (ANALYZER_EXTENSIONS.has(ext)) {
     try {
       const analysis = await analyzeFile(initialKey);
       aiFolderId = mapToAiFolder(analysis.category, analysis.type);
-      detail = analysis.detail || undefined;
 
       if (analysis.via !== "fallback") {
         try {
@@ -315,8 +322,6 @@ async function handlePersonalFileMessage(
       } catch (idxErr) {
         console.warn("[line/webhook] index update failed:", idxErr);
       }
-
-      analyzed = analysis.via !== "fallback";
     } catch (analyzerErr) {
       console.warn("[line/webhook] analyzer skipped:", analyzerErr);
     }
@@ -328,9 +333,7 @@ async function handlePersonalFileMessage(
     uploadSuccessBubble({
       filename:   finalFilename,
       folderName: aiFolderName(aiFolderId),
-      liffUrl:    liffUrl(),
-      detail,
-      analyzed,
+      liffUrl:    liffUrl({ file: finalKey }),
     }),
   ];
 }
@@ -361,15 +364,12 @@ async function handleWorkspaceFileMessage(
 
   let finalKey = initialKey;
   let finalFilename = filename;
-  let analyzed = false;
-  let detail: string | undefined;
   let aiFolderId = "ai-docs-general";
 
   if (ANALYZER_EXTENSIONS.has(ext)) {
     try {
       const analysis = await analyzeFile(initialKey);
       aiFolderId = mapToAiFolder(analysis.category, analysis.type);
-      detail = analysis.detail || undefined;
 
       if (analysis.via !== "fallback") {
         try {
@@ -416,8 +416,6 @@ async function handleWorkspaceFileMessage(
       } catch (idxErr) {
         console.warn("[line/webhook] workspace index update failed:", idxErr);
       }
-
-      analyzed = analysis.via !== "fallback";
     } catch (analyzerErr) {
       console.warn("[line/webhook] analyzer skipped:", analyzerErr);
     }
@@ -427,9 +425,7 @@ async function handleWorkspaceFileMessage(
     uploadSuccessBubble({
       filename:      finalFilename,
       folderName:    aiFolderName(aiFolderId),
-      liffUrl:       liffUrl(),
-      detail,
-      analyzed,
+      liffUrl:       liffUrl({ file: finalKey, ws: workspace.id }),
       workspaceName: workspace.name,
     }),
   ];
