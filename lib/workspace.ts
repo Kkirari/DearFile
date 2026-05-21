@@ -36,10 +36,17 @@ import {
   s3,
   BUCKET,
   isSafeWorkspaceId,
+  isSafeFolderId,
   userWorkspacesIndexKey,
   workspaceMetaKey,
+  workspaceFolderMetaKey,
 } from "./s3";
 import { AuthError } from "./auth";
+import {
+  type FolderMode,
+  DEFAULT_FOLDER_MODE,
+  isFolderMode,
+} from "./folder-permissions";
 
 export type WorkspaceRole = "owner" | "member";
 
@@ -424,6 +431,44 @@ export function markOrphaned(workspaceId: string): Promise<WorkspaceMeta | null>
       throw err;
     }
   });
+}
+
+// ── Folder permission lookup ──────────────────────────────────────────────
+
+/**
+ * Read a workspace folder's permission mode from its folder-meta JSON.
+ * Returns `DEFAULT_FOLDER_MODE` ("upload") when:
+ *   - the folder-meta file doesn't exist (legacy folder, missing key)
+ *   - the JSON is malformed
+ *   - the `permissions.mode` field is absent or an unrecognized value
+ *
+ * Workspace inbox files don't have a folder id — callers should treat them
+ * as `upload` mode without calling this function.
+ */
+export async function getFolderPermission(
+  workspaceId: string,
+  folderId: string,
+): Promise<FolderMode> {
+  if (!isSafeWorkspaceId(workspaceId) || !isSafeFolderId(folderId)) {
+    return DEFAULT_FOLDER_MODE;
+  }
+  try {
+    const res = await s3.send(new GetObjectCommand({
+      Bucket: BUCKET,
+      Key:    workspaceFolderMetaKey(workspaceId, folderId),
+    }));
+    const body = await res.Body?.transformToString();
+    if (!body) return DEFAULT_FOLDER_MODE;
+    const meta = JSON.parse(body) as { permissions?: { mode?: unknown } };
+    const mode = meta?.permissions?.mode;
+    return isFolderMode(mode) ? mode : DEFAULT_FOLDER_MODE;
+  } catch (err: unknown) {
+    if ((err as { name?: string }).name === "NoSuchKey") return DEFAULT_FOLDER_MODE;
+    // Anything else (network, transient S3) → fail closed-ish: return the
+    // default. We never want a permission lookup to throw and break uploads.
+    console.warn(`[workspace] getFolderPermission(${workspaceId}, ${folderId}) failed; defaulting:`, err);
+    return DEFAULT_FOLDER_MODE;
+  }
 }
 
 // ── Auth gate ─────────────────────────────────────────────────────────────
