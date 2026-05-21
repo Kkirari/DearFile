@@ -14,6 +14,7 @@ import { FolderPickerSheet } from "@/components/folder-picker-sheet";
 import { ShareSheet } from "@/components/share-sheet";
 import { formatBytes, getFileIcon } from "@/lib/utils";
 import { useLanguage } from "@/providers/language-provider";
+import { useWorkspace } from "@/providers/workspace-provider";
 import type { FolderItem } from "@/types/folder";
 import type { FileItem } from "@/types/file";
 import { apiFetch } from "@/lib/api-client";
@@ -48,6 +49,7 @@ interface FolderViewerProps {
 
 export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: FolderViewerProps) {
   const { tr } = useLanguage();
+  const { currentWorkspaceId } = useWorkspace();
   const isInbox    = folder === "inbox";
   const folderId   = isInbox ? null : folder.id;
   const folderName = isInbox ? "Inbox" : folder.name;
@@ -167,7 +169,11 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
       const res  = await apiFetch("/api/files/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "delete", keys }),
+        body: JSON.stringify({
+          action: "delete",
+          keys,
+          ...(currentWorkspaceId ? { workspaceId: currentWorkspaceId } : {}),
+        }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error ?? "Delete failed");
@@ -189,7 +195,12 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
       const res  = await apiFetch("/api/files/batch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "move", keys, targetFolderId }),
+        body: JSON.stringify({
+          action: "move",
+          keys,
+          targetFolderId,
+          ...(currentWorkspaceId ? { workspaceId: currentWorkspaceId } : {}),
+        }),
       });
       const data = await res.json();
       if (!data.ok) throw new Error(data.error ?? "Move failed");

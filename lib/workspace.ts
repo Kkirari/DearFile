@@ -30,6 +30,9 @@
 import {
   GetObjectCommand,
   PutObjectCommand,
+  DeleteObjectCommand,
+  DeleteObjectsCommand,
+  ListObjectsV2Command,
 } from "@aws-sdk/client-s3";
 import crypto from "crypto";
 import {
@@ -40,6 +43,9 @@ import {
   userWorkspacesIndexKey,
   workspaceMetaKey,
   workspaceFolderMetaKey,
+  workspacePrefix,
+  workspaceInvitesPrefix,
+  inviteBindingKey,
 } from "./s3";
 import { AuthError } from "./auth";
 import {
@@ -498,4 +504,99 @@ export async function requireWorkspaceAccess(
   }
 
   return member;
+}
+
+// ── Cascade delete ─────────────────────────────────────────────────────────
+
+/**
+ * Permanently delete an entire workspace and everything tied to it:
+ *   - every object under `workspaces/{id}/` (files, folder-meta, search
+ *     index, invite records, `_meta.json`)
+ *   - the reverse invite bindings at `invite-bindings/{token}.json`
+ *   - the `group-bindings/{lineGroupId}.json` binding (if group-bound)
+ *   - the workspace entry in every member's `_workspaces.json`
+ *
+ * Caller MUST gate with `requireWorkspaceAccess(userId, id, "owner")` first.
+ * Best-effort and idempotent — re-running on a half-deleted workspace is safe.
+ */
+export async function deleteWorkspaceCascade(
+  workspaceId: string,
+): Promise<{ deletedObjects: number }> {
+  if (!isSafeWorkspaceId(workspaceId)) {
+    throw new AuthError(400, "Invalid workspaceId");
+  }
+
+  // Load meta first to capture members + lineGroupId before we wipe it.
+  const meta = await loadWorkspaceMeta(workspaceId);
+
+  // 1. Delete reverse invite bindings (they live OUTSIDE the workspace prefix).
+  try {
+    const inviteTokens: string[] = [];
+    let inviteCont: string | undefined;
+    do {
+      const list = await s3.send(new ListObjectsV2Command({
+        Bucket:            BUCKET,
+        Prefix:            workspaceInvitesPrefix(workspaceId),
+        ContinuationToken: inviteCont,
+      }));
+      for (const o of list.Contents ?? []) {
+        if (o.Key?.endsWith(".json")) {
+          inviteTokens.push(o.Key.split("/").pop()!.replace(".json", ""));
+        }
+      }
+      inviteCont = list.IsTruncated ? list.NextContinuationToken : undefined;
+    } while (inviteCont);
+
+    await Promise.all(inviteTokens.map((t) =>
+      s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: inviteBindingKey(t) }))
+        .catch(() => undefined),
+    ));
+  } catch (err) {
+    console.warn(`[workspace] invite-binding cleanup failed for ${workspaceId}:`, err);
+  }
+
+  // 2. Delete the group binding (if any).
+  if (meta?.lineGroupId) {
+    await s3.send(new DeleteObjectCommand({
+      Bucket: BUCKET,
+      Key:    groupBindingKey(meta.lineGroupId),
+    })).catch(() => undefined);
+  }
+
+  // 3. Delete every object under workspaces/{id}/ in 1000-key batches.
+  const objectKeys: { Key: string }[] = [];
+  let cont: string | undefined;
+  do {
+    const list = await s3.send(new ListObjectsV2Command({
+      Bucket:            BUCKET,
+      Prefix:            workspacePrefix(workspaceId),
+      ContinuationToken: cont,
+    }));
+    for (const o of list.Contents ?? []) {
+      if (o.Key) objectKeys.push({ Key: o.Key });
+    }
+    cont = list.IsTruncated ? list.NextContinuationToken : undefined;
+  } while (cont);
+
+  let deletedObjects = 0;
+  for (let i = 0; i < objectKeys.length; i += 1000) {
+    const batch = objectKeys.slice(i, i + 1000);
+    const res = await s3.send(new DeleteObjectsCommand({
+      Bucket: BUCKET,
+      Delete: { Objects: batch, Quiet: true },
+    }));
+    deletedObjects += batch.length - (res.Errors?.length ?? 0);
+    if (res.Errors?.length) {
+      console.warn(`[workspace] cascade delete batch errors for ${workspaceId}:`, res.Errors);
+    }
+  }
+
+  // 4. Remove the workspace from each member's per-user index.
+  if (meta) {
+    await Promise.all(meta.members.map((m) =>
+      removeFromUserIndex(m.userId, workspaceId).catch(() => undefined),
+    ));
+  }
+
+  return { deletedObjects };
 }

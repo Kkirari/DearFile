@@ -11,6 +11,7 @@ import { formatBytes, formatDate, getFileIcon } from "@/lib/utils";
 import type { FileItem } from "@/types/file";
 import type { FolderItem } from "@/types/folder";
 import { apiFetch } from "@/lib/api-client";
+import { useWorkspace } from "@/providers/workspace-provider";
 
 // ── Type config ───────────────────────────────────────────────────────────────
 
@@ -50,6 +51,8 @@ export function FileDetailSheet({
   const [movePickerOpen, setMovePickerOpen] = useState(false);
   const [shareOpen, setShareOpen]           = useState(false);
 
+  const { currentWorkspaceId } = useWorkspace();
+
   const type = getFileIcon(file.mimeType) as keyof typeof TYPE_CONFIG;
   const cfg  = TYPE_CONFIG[type] ?? TYPE_CONFIG.file;
   const Icon = cfg.icon;
@@ -85,7 +88,11 @@ export function FileDetailSheet({
       const res = await apiFetch("/api/files/move", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: file.id, targetFolderId }),
+        body: JSON.stringify({
+          key: file.id,
+          targetFolderId,
+          ...(currentWorkspaceId ? { workspaceId: currentWorkspaceId } : {}),
+        }),
       });
       if (!res.ok) throw new Error("Move failed");
       close();
@@ -106,7 +113,10 @@ export function FileDetailSheet({
       await apiFetch("/api/files", {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: file.id }),
+        body: JSON.stringify({
+          key: file.id,
+          ...(currentWorkspaceId ? { workspaceId: currentWorkspaceId } : {}),
+        }),
       });
       close();
       setTimeout(onDeleted, 300);

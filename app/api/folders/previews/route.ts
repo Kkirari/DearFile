@@ -14,13 +14,18 @@ import {
   s3,
   BUCKET,
   mimeFromFilename,
+  isSafeWorkspaceId,
   userUploadsPrefix,
   userFolderPrefix,
   userFolderMetaPrefix,
+  workspaceInboxPrefix,
+  workspaceFolderPrefix,
+  workspaceFolderMetaPrefix,
 } from "@/lib/s3";
 import { AI_FOLDERS } from "@/lib/ai-folders";
-import { getAllEntries } from "@/lib/search-index";
+import { getAllEntries, getAllWorkspaceEntries } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
+import { requireWorkspaceAccess } from "@/lib/workspace";
 import { getCached, setCached } from "@/lib/previews-cache";
 import type { PreviewItem, FolderPreview } from "@/types/preview";
 
@@ -64,42 +69,61 @@ export async function GET(req: Request) {
     throw err;
   }
 
-  // Fast path — serve from in-process cache when warm. Mutating routes
-  // call invalidatePreviews so the cache stays fresh on the happy path.
-  const cached = getCached(userId);
-  if (cached) {
-    return Response.json({ previews: cached });
-  }
-
   try {
+    // ── Resolve scope (personal or membership-gated workspace) ─────────
+    const workspaceId = new URL(req.url).searchParams.get("workspaceId");
+    let wsId: string | null = null;
+    if (workspaceId !== null && workspaceId !== "") {
+      if (!isSafeWorkspaceId(workspaceId)) {
+        return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
+      }
+      await requireWorkspaceAccess(userId, workspaceId);
+      wsId = workspaceId;
+    }
+
+    const cacheKey      = wsId ? `ws:${wsId}` : userId;
+    const inboxPrefix   = wsId ? workspaceInboxPrefix(wsId) : userUploadsPrefix(userId);
+    const folderMetaPfx = wsId ? workspaceFolderMetaPrefix(wsId) : userFolderMetaPrefix(userId);
+    const folderPrefix  = (id: string) =>
+      wsId ? workspaceFolderPrefix(wsId, id) : userFolderPrefix(userId, id);
+
+    // Fast path — serve from in-process cache when warm. Mutating routes
+    // call invalidatePreviews so the cache stays fresh on the happy path.
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return Response.json({ previews: cached });
+    }
+
     const previews: Record<string, FolderPreview> = {};
 
-    // ── Inbox (uploads/) ──────────────────────────────────────────────
+    // ── Inbox ─────────────────────────────────────────────────────────
     {
-      const { items, total } = await listFolderPreviews(userUploadsPrefix(userId));
+      const { items, total } = await listFolderPreviews(inboxPrefix);
       const thumbs = await Promise.all(items.map((it) => previewItemFromKey(it.Key)));
       previews["inbox"] = { total, thumbnails: thumbs };
     }
 
-    // ── User folders ──────────────────────────────────────────────────
+    // ── Real folders ──────────────────────────────────────────────────
     const metaRes = await s3.send(new ListObjectsV2Command({
       Bucket: BUCKET,
-      Prefix: userFolderMetaPrefix(userId),
+      Prefix: folderMetaPfx,
     }));
     const folderIds = (metaRes.Contents ?? [])
       .map((o) => o.Key)
       .filter((k): k is string => !!k && k.endsWith(".json"))
-      .map((k) => k.replace(userFolderMetaPrefix(userId), "").replace(".json", ""));
+      .map((k) => k.replace(folderMetaPfx, "").replace(".json", ""));
 
     await Promise.all(folderIds.map(async (id) => {
-      const { items, total } = await listFolderPreviews(userFolderPrefix(userId, id));
+      const { items, total } = await listFolderPreviews(folderPrefix(id));
       const thumbs = await Promise.all(items.map((it) => previewItemFromKey(it.Key)));
       previews[id] = { total, thumbnails: thumbs };
     }));
 
     // ── AI folders (virtual — query search index) ─────────────────────
     try {
-      const allEntries = await getAllEntries(userId);
+      const allEntries = wsId
+        ? await getAllWorkspaceEntries(wsId)
+        : await getAllEntries(userId);
       const byAi: Record<string, typeof allEntries> = {};
       for (const e of allEntries) {
         (byAi[e.ai_folder_id] ??= []).push(e);
@@ -119,9 +143,10 @@ export async function GET(req: Request) {
       console.warn("[folder previews] AI folder fetch failed:", err);
     }
 
-    setCached(userId, previews);
+    setCached(cacheKey, previews);
     return Response.json({ previews });
   } catch (err) {
+    if (err instanceof AuthError) return authErrorResponse(err);
     const message = err instanceof Error ? err.message : String(err);
     console.error("[GET /api/folders/previews]", message);
     return Response.json({ error: message }, { status: 500 });
