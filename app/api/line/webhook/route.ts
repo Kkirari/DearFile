@@ -21,8 +21,10 @@
 
 import { PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
 import {
+  answerBubble,
   fetchGroupSummary,
   fetchLineContent,
+  greetingBubble,
   helpBubble,
   replyMessage,
   uploadSuccessBubble,
@@ -43,9 +45,13 @@ import {
 import { analyzeFile } from "@/lib/analyzer";
 import { AI_FOLDERS, mapToAiFolder } from "@/lib/ai-folders";
 import {
+  getAllEntries,
   upsertEntry,
   upsertWorkspaceEntry,
 } from "@/lib/search-index";
+import { askDearFile, type AskScope } from "@/lib/ask";
+import { checkAndIncrementAsk } from "@/lib/rate-limit";
+import { routeIntent } from "@/lib/intent";
 import { invalidatePreviews } from "@/lib/previews-cache";
 import {
   addMember,
@@ -474,6 +480,59 @@ async function handleFolderCommand(
   }];
 }
 
+// ── Ask DearFile (chat retrieval) ─────────────────────────────────────────
+
+// Group chats only answer when explicitly addressed. DMs treat any text as a
+// question, but still strip these prefixes if a user types one out of habit.
+const ASK_PREFIXES = [/^\/dearfile\b\s*/i, /^\/น้องกวาง\b\s*/];
+
+/**
+ * If `text` begins with an Ask prefix, return the remaining question (may be
+ * empty). Otherwise return null — meaning "not addressed to Ask".
+ */
+function parseAskCommand(text: string): string | null {
+  for (const re of ASK_PREFIXES) {
+    if (re.test(text)) return text.replace(re, "").trim();
+  }
+  return null;
+}
+
+/**
+ * Run a question through the Ask engine and build the reply. Rate-limits per
+ * LINE user first (a friendly cap message, no model call, when exceeded). Any
+ * generation/Gateway error degrades to a graceful text reply — the webhook
+ * still returns 200 either way.
+ */
+async function handleAskMessage(
+  scope: AskScope,
+  userId: string,
+  question: string,
+): Promise<LineMessage[]> {
+  const { allowed } = await checkAndIncrementAsk(userId);
+  if (!allowed) {
+    return [{
+      type: "text",
+      text:
+        "📊 วันนี้ถามครบจำนวนแล้ว ลองใหม่พรุ่งนี้นะ\n" +
+        "You've reached today's question limit — try again tomorrow.",
+    }];
+  }
+
+  try {
+    const { answer, citations } = await askDearFile(scope, question);
+    const wsId = scope.kind === "workspace" ? scope.workspaceId : undefined;
+    return [answerBubble(answer, citations, (e) => liffUrl({ file: e.key, ws: wsId }))];
+  } catch (err) {
+    console.error("[line/webhook] ask failed:", err);
+    return [{
+      type: "text",
+      text:
+        "⚠️ ตอบไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
+        "Couldn't answer right now — please try again.",
+    }];
+  }
+}
+
 // ── Event dispatch ────────────────────────────────────────────────────────
 
 async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | null> {
@@ -524,9 +583,21 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
     }
 
     if (msg.type === "text") {
-      const folderResp = await handleFolderCommand(workspace, userId, msg.text ?? "");
+      const text = msg.text ?? "";
+      const folderResp = await handleFolderCommand(workspace, userId, text);
       if (folderResp) return folderResp;
-      // Stay silent on other text in groups — don't be a chatbot in busy rooms.
+
+      // Ask is opt-in in groups: only answer when explicitly addressed with a
+      // /dearfile or /น้องกวาง prefix. Anything else stays silent — don't be a
+      // chatbot in busy rooms.
+      const question = parseAskCommand(text);
+      if (question !== null && question.length > 0) {
+        return handleAskMessage(
+          { kind: "workspace", workspaceId: workspace.id },
+          userId,
+          question,
+        );
+      }
       return null;
     }
 
@@ -553,7 +624,32 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
   }
 
   if (msg.type === "text") {
-    return [helpBubble(liffUrl())];
+    // In a DM, plain text is a question. A typed prefix is still stripped.
+    const raw = msg.text ?? "";
+    const stripped = parseAskCommand(raw);
+    const hadPrefix = stripped !== null;
+    const question = (hadPrefix ? stripped : raw).trim();
+
+    // Blank question, or nothing saved yet → onboarding help bubble instead of
+    // an "I found nothing" AI call.
+    if (!question) return [helpBubble(liffUrl())];
+    const index = await getAllEntries(userId);
+    if (index.length === 0) return [helpBubble(liffUrl())];
+
+    // An explicit /dearfile|/น้องกวาง prefix is an explicit ASK — skip the
+    // router. Otherwise let the Hybrid Intent Router decide so greetings /
+    // help / noise don't pay for the Ask pipeline.
+    const intent = hadPrefix ? "ask" : (await routeIntent(question)).intent;
+    switch (intent) {
+      case "ask":
+        return handleAskMessage({ kind: "user", userId }, userId, question);
+      case "help":
+        return [helpBubble(liffUrl())];
+      case "greeting":
+        return [greetingBubble(liffUrl())];
+      case "noise":
+        return null; // stray emoji / punctuation — stay quiet
+    }
   }
 
   return null;
