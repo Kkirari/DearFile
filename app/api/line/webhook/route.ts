@@ -482,17 +482,27 @@ async function handleFolderCommand(
 
 // ── Ask DearFile (chat retrieval) ─────────────────────────────────────────
 
-// Group chats only answer when explicitly addressed. DMs treat any text as a
-// question, but still strip these prefixes if a user types one out of habit.
-const ASK_PREFIXES = [/^\/dearfile\b\s*/i, /^\/น้องกวาง\b\s*/];
+// Sigils + triggers that explicitly address the bot. Matched by string, NOT a
+// regex: a JS `\b` word boundary is ASCII-only and never fires after Thai
+// characters, which silently broke the `/น้องกวาง` trigger entirely. Accept
+// `/`, `!`, and `@` so users aren't punished for guessing the sigil.
+const ASK_SIGILS = ["/", "!", "@"];
+const ASK_TRIGGERS = ["dearfile", "น้องกวาง"];
 
 /**
- * If `text` begins with an Ask prefix, return the remaining question (may be
- * empty). Otherwise return null — meaning "not addressed to Ask".
+ * If `text` explicitly addresses the bot (a sigil + trigger, e.g. "/dearfile",
+ * "!น้องกวาง", "@dearfile"), return the remaining question (may be empty).
+ * Otherwise return null — meaning "not addressed to Ask".
  */
 function parseAskCommand(text: string): string | null {
-  for (const re of ASK_PREFIXES) {
-    if (re.test(text)) return text.replace(re, "").trim();
+  const t = (text ?? "").trimStart();
+  for (const sigil of ASK_SIGILS) {
+    if (!t.startsWith(sigil)) continue;
+    const rest = t.slice(sigil.length).trimStart();
+    const lower = rest.toLowerCase();
+    for (const trig of ASK_TRIGGERS) {
+      if (lower.startsWith(trig.toLowerCase())) return rest.slice(trig.length).trim();
+    }
   }
   return null;
 }
@@ -588,17 +598,24 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
       if (folderResp) return folderResp;
 
       // Ask is opt-in in groups: only answer when explicitly addressed with a
-      // /dearfile or /น้องกวาง prefix. Anything else stays silent — don't be a
-      // chatbot in busy rooms.
+      // sigil + trigger (/dearfile · !dearfile · /น้องกวาง · !น้องกวาง). Other
+      // chatter stays silent — don't be a chatbot in busy rooms.
       const question = parseAskCommand(text);
-      if (question !== null && question.length > 0) {
-        return handleAskMessage(
-          { kind: "workspace", workspaceId: workspace.id },
-          userId,
-          question,
-        );
+      if (question === null) return null;
+      if (question.length === 0) {
+        // Bare trigger with no question — confirm we're listening + show how.
+        return [{
+          type: "text",
+          text:
+            '🦌 พิมพ์คำถามต่อท้ายได้เลย เช่น "/น้องกวาง หาใบเสร็จเดือนที่แล้ว"\n' +
+            'Add your question after the trigger, e.g. "/dearfile find last month\'s receipt".',
+        }];
       }
-      return null;
+      return handleAskMessage(
+        { kind: "workspace", workspaceId: workspace.id },
+        userId,
+        question,
+      );
     }
 
     if (msg.type === "image" || msg.type === "video" || msg.type === "audio" || msg.type === "file") {
