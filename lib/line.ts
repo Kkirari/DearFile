@@ -11,6 +11,7 @@
  */
 
 import crypto from "crypto";
+import type { IndexEntry } from "./search-index";
 
 const LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply";
 const LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push";
@@ -431,6 +432,139 @@ export function helpBubble(liffUrl: string): LineFlexMessage {
               label: "เปิด DearFile / Open",
               uri: liffUrl,
             },
+          },
+        ],
+      },
+    },
+  };
+}
+
+/**
+ * Answer bubble for "Ask DearFile" — the model's grounded reply plus up to a
+ * few tappable citations. Each citation deep-links to that file in the LIFF
+ * app (the caller builds the URL with `liffUrlFor`, which carries `?file=&ws=`).
+ *
+ * One compact `kilo` bubble in the DearFile palette: the wrapped answer, a
+ * separator, then `📄 {filename}` rows. With no citations (nothing matched)
+ * the bubble is just the answer text.
+ */
+export function answerBubble(
+  answer: string,
+  citations: IndexEntry[],
+  liffUrlFor: (entry: IndexEntry) => string,
+): LineFlexMessage {
+  const bodyContents: unknown[] = [
+    {
+      type: "text",
+      text: answer,
+      size: "sm",
+      color: TEXT_DARK_WARM,
+      wrap: true,
+    },
+  ];
+
+  if (citations.length > 0) {
+    bodyContents.push({ type: "separator", margin: "lg", color: BORDER_BEIGE });
+    for (const entry of citations) {
+      bodyContents.push({
+        type: "box",
+        layout: "baseline",
+        spacing: "sm",
+        margin: "md",
+        action: { type: "uri", label: "เปิด / Open", uri: liffUrlFor(entry) },
+        contents: [
+          { type: "text", text: "📄", flex: 0, size: "sm" },
+          {
+            type: "text",
+            text: entry.filename,
+            size: "sm",
+            color: BRAND_MAUVE,
+            weight: "bold",
+            flex: 1,
+            wrap: true,
+          },
+        ],
+      });
+    }
+  }
+
+  const altText = answer.length > 60 ? `${answer.slice(0, 57)}...` : answer;
+
+  return {
+    type: "flex",
+    altText,
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      styles: { body: { backgroundColor: CARD_CREAM } },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "20px",
+        spacing: "sm",
+        contents: bodyContents,
+      },
+    },
+  };
+}
+
+/**
+ * Warm canned reply for greetings / small talk (the Hybrid Intent Router routes
+ * non-question DM text here instead of paying for the Ask pipeline). A compact
+ * bubble that nudges the user toward asking for a file, with an Open button.
+ */
+export function greetingBubble(liffUrl: string): LineFlexMessage {
+  return {
+    type: "flex",
+    altText: "สวัสดีค่ะ! ลองถามหาไฟล์ได้เลย / Hi! Ask me to find a file.",
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      styles: { body: { backgroundColor: CARD_CREAM }, footer: { backgroundColor: CARD_CREAM } },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "20px",
+        spacing: "sm",
+        contents: [
+          {
+            type: "text",
+            text: "🦌 สวัสดีค่ะ! น้องกวางช่วยหาไฟล์ที่คุณเก็บไว้ได้",
+            size: "sm",
+            weight: "bold",
+            color: TEXT_DARK_WARM,
+            wrap: true,
+          },
+          {
+            type: "text",
+            text: 'ลองพิมพ์สิ่งที่อยากหา เช่น "ใบเสร็จเดือนที่แล้ว"',
+            size: "xs",
+            color: TEXT_TAUPE,
+            wrap: true,
+          },
+          { type: "separator", margin: "md", color: BORDER_BEIGE },
+          {
+            type: "text",
+            text: 'Hi! I\'m Nong Kwang — ask me to find any file you\'ve saved, e.g. "last month\'s receipt."',
+            size: "xs",
+            color: TEXT_TAUPE,
+            margin: "sm",
+            wrap: true,
+          },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        paddingTop: "0px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: BRAND_MAUVE,
+            height: "sm",
+            action: { type: "uri", label: "เปิด DearFile / Open", uri: liffUrl },
           },
         ],
       },
