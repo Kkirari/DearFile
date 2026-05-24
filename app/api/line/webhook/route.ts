@@ -27,6 +27,7 @@ import {
   greetingBubble,
   helpBubble,
   replyMessage,
+  summaryBubble,
   uploadSuccessBubble,
   verifyLineSignature,
   welcomeBubble,
@@ -50,6 +51,7 @@ import {
   upsertWorkspaceEntry,
 } from "@/lib/search-index";
 import { askDearFile, type AskScope } from "@/lib/ask";
+import { buildDailySummary } from "@/lib/summary";
 import { checkAndIncrementAsk } from "@/lib/rate-limit";
 import { routeIntent } from "@/lib/intent";
 import { invalidatePreviews } from "@/lib/previews-cache";
@@ -507,6 +509,55 @@ function parseAskCommand(text: string): string | null {
   return null;
 }
 
+// ── Daily summary (on-demand) ──────────────────────────────────────────────
+
+// Whole-message triggers for an on-demand "today's recap". Kept tight (exact
+// match after stripping a leading sigil) so it never steals a real question
+// like "หาสรุปการประชุม".
+const SUMMARY_COMMANDS = new Set(["summary", "recap", "สรุป", "สรุปวันนี้"]);
+
+function isSummaryCommand(text: string): boolean {
+  const t = (text ?? "").trim().toLowerCase().replace(/^[/!@]/, "").trim();
+  return SUMMARY_COMMANDS.has(t);
+}
+
+/**
+ * Build today's brief for a DM user on demand. Replies (free reply token, no
+ * push quota) so it doubles as the easiest way to test the summary in LINE.
+ * Empty day → a gentle nudge; any error → a graceful text reply.
+ */
+async function handleSummaryCommand(userId: string): Promise<LineMessage[]> {
+  try {
+    const summary = await buildDailySummary(userId);
+    if (!summary) {
+      return [{
+        type: "text",
+        text:
+          "📭 วันนี้ยังไม่มีไฟล์ที่บันทึกไว้ ลองส่งไฟล์มาได้เลย\n" +
+          "Nothing saved yet today — send me a file to get started.",
+      }];
+    }
+    return [summaryBubble(
+      {
+        date:       summary.date,
+        count:      summary.count,
+        text:       summary.text,
+        highlights: summary.highlights,
+      },
+      (e) => liffUrl({ file: e.key }),
+      liffUrl(),
+    )];
+  } catch (err) {
+    console.error("[line/webhook] summary command failed:", err);
+    return [{
+      type: "text",
+      text:
+        "⚠️ สรุปไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
+        "Couldn't build your summary right now — please try again.",
+    }];
+  }
+}
+
 /**
  * Run a question through the Ask engine and build the reply. Rate-limits per
  * LINE user first (a friendly cap message, no model call, when exceeded). Any
@@ -643,6 +694,10 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
   if (msg.type === "text") {
     // In a DM, plain text is a question. A typed prefix is still stripped.
     const raw = msg.text ?? "";
+
+    // On-demand daily recap: "/summary" · "สรุป" · "recap" · "สรุปวันนี้".
+    if (isSummaryCommand(raw)) return handleSummaryCommand(userId);
+
     const stripped = parseAskCommand(raw);
     const hadPrefix = stripped !== null;
     const question = (hadPrefix ? stripped : raw).trim();

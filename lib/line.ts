@@ -509,6 +509,127 @@ export function answerBubble(
 }
 
 /**
+ * Daily summary bubble — the end-of-day brief (Phase 6). A header strip with
+ * the date, the AI-synthesized recap, a count line, and up to a few tappable
+ * file highlights that deep-link into the LIFF app. `liffUrlFor` builds each
+ * highlight's `?file=` deep link; `liffHome` is the plain app link for the
+ * footer button.
+ */
+export interface DailySummaryView {
+  date: string;
+  count: number;
+  text: string;
+  highlights: IndexEntry[];
+}
+
+export function summaryBubble(
+  view: DailySummaryView,
+  liffUrlFor: (entry: IndexEntry) => string,
+  liffHome: string,
+): LineFlexMessage {
+  const bodyContents: unknown[] = [
+    {
+      type: "text",
+      text: `วันนี้บันทึก ${view.count} ไฟล์ / ${view.count} saved today`,
+      size: "xs",
+      color: TEXT_TAUPE,
+      wrap: true,
+    },
+    {
+      type: "text",
+      text: view.text,
+      size: "sm",
+      color: TEXT_DARK_WARM,
+      wrap: true,
+      margin: "md",
+    },
+  ];
+
+  if (view.highlights.length > 0) {
+    bodyContents.push({ type: "separator", margin: "lg", color: BORDER_BEIGE });
+    for (const entry of view.highlights) {
+      bodyContents.push({
+        type: "box",
+        layout: "baseline",
+        spacing: "sm",
+        margin: "md",
+        action: { type: "uri", label: "เปิด / Open", uri: liffUrlFor(entry) },
+        contents: [
+          { type: "text", text: "📄", flex: 0, size: "sm" },
+          {
+            type: "text",
+            text: entry.filename,
+            size: "sm",
+            color: BRAND_MAUVE,
+            weight: "bold",
+            flex: 1,
+            wrap: true,
+          },
+        ],
+      });
+    }
+  }
+
+  return {
+    type: "flex",
+    altText: `📋 สรุปวันนี้ · ${view.date} / Today's recap`,
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      styles: {
+        header: { backgroundColor: BRAND_MAUVE },
+        body:   { backgroundColor: CARD_CREAM },
+        footer: { backgroundColor: CARD_CREAM },
+      },
+      header: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "20px",
+        paddingBottom: "16px",
+        spacing: "xs",
+        contents: [
+          {
+            type: "text",
+            text: "📋 สรุปวันนี้ / Today's recap",
+            weight: "bold",
+            color: "#FFFFFF",
+            size: "md",
+          },
+          {
+            type: "text",
+            text: view.date,
+            color: "#FFFFFF",
+            size: "xs",
+          },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "20px",
+        spacing: "sm",
+        contents: bodyContents,
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        paddingTop: "0px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: BRAND_MAUVE,
+            height: "sm",
+            action: { type: "uri", label: "เปิด DearFile / Open", uri: liffHome },
+          },
+        ],
+      },
+    },
+  };
+}
+
+/**
  * Warm canned reply for greetings / small talk (the Hybrid Intent Router routes
  * non-question DM text here instead of paying for the Ask pipeline). A compact
  * bubble that nudges the user toward asking for a file, with an Open button.
