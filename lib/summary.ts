@@ -26,6 +26,7 @@ import { generateText } from "ai";
 import { getAllEntries, type IndexEntry } from "./search-index";
 import { getAiFolder } from "./ai-folders";
 import { resolveModel } from "./ask";
+import { listReadyItemsSince, type ContentItem } from "./db";
 
 const DEFAULT_MODEL = "anthropic/claude-haiku-4-5";
 const ICT_OFFSET_MS = 7 * 60 * 60 * 1000;   // Thailand is UTC+7, no DST
@@ -97,60 +98,82 @@ const SYSTEM_PROMPT = [
   "- No markdown, no bullet symbols, no file keys or URLs. Keep it chat-sized.",
 ].join("\n");
 
-async function synthesize(files: IndexEntry[], date: string): Promise<string> {
+async function synthesize(files: IndexEntry[], items: ContentItem[], date: string): Promise<string> {
   const fileLines = files
     .slice(0, MAX_FILES_TO_MODEL)
     .map((e) => {
       const label = e.subject || e.filename;
       const detail = e.detail ? ` — ${e.detail}` : "";
-      return `- [${e.category}] ${label}${detail}`;
+      return `- [file/${e.category}] ${label}${detail}`;
     });
 
-  const prompt = [`Date: ${date}`, `Files saved today (${files.length}):`, fileLines.join("\n")].join("\n\n");
+  const itemLines = items
+    .slice(0, MAX_FILES_TO_MODEL)
+    .map((it) => {
+      const label = it.title || (it.type === "link" ? it.sourceUrl ?? "link" : "note");
+      const detail = it.summary ? ` — ${it.summary.replace(/\s+/g, " ").slice(0, 160)}` : "";
+      return `- [${it.type}/${it.category ?? "general"}] ${label}${detail}`;
+    });
+
+  const sections: string[] = [`Date: ${date}`];
+  if (fileLines.length) sections.push(`Files saved today (${files.length}):\n${fileLines.join("\n")}`);
+  if (itemLines.length) sections.push(`Notes & links saved today (${items.length}):\n${itemLines.join("\n")}`);
 
   const { text } = await generateText({
     model:           resolveModel(process.env.SUMMARY_MODEL_ID ?? DEFAULT_MODEL),
     system:          SYSTEM_PROMPT,
-    prompt,
+    prompt:          sections.join("\n\n"),
     maxOutputTokens: 500,
   });
   return text.trim();
 }
 
 /** Deterministic fallback used when the model errors or returns empty. */
-function templateBrief(files: IndexEntry[]): string {
+function templateBrief(files: IndexEntry[], items: ContentItem[]): string {
   const parts = categoryBreakdown(files).map(([name, n]) => `${name} ×${n}`);
+  if (items.length) parts.push(`📝 Notes & links ×${items.length}`);
+  const total = files.length + items.length;
   return (
-    `วันนี้คุณบันทึกไว้ ${files.length} ไฟล์ — ${parts.join(", ")}\n` +
-    `Today you saved ${files.length} file(s): ${parts.join(", ")}.`
+    `วันนี้คุณบันทึกไว้ ${total} รายการ — ${parts.join(", ")}\n` +
+    `Today you saved ${total} item(s): ${parts.join(", ")}.`
   );
 }
 
 // ── Public API ────────────────────────────────────────────────────────────
 
 /**
- * Build today's brief for a user, or null when no files were captured today
+ * Build today's brief for a user, or null when nothing was captured today
  * (callers skip the push/reply entirely — no "you saved nothing" spam).
+ * Covers both S3 files and Neon notes/links; the latter is best-effort so the
+ * recap still works if the DB isn't provisioned yet.
  */
 export async function buildDailySummary(
   userId: string,
   nowMs = Date.now(),
 ): Promise<DailySummary | null> {
   const files = capturesToday(await getAllEntries(userId), nowMs);
-  if (files.length === 0) return null;
+
+  let items: ContentItem[] = [];
+  try {
+    items = await listReadyItemsSince(userId, new Date(ictDayStartMs(nowMs)).toISOString());
+  } catch (err) {
+    console.warn("[summary] content_items unavailable (DB not provisioned?):", err);
+  }
+
+  if (files.length === 0 && items.length === 0) return null;
 
   let text: string;
   try {
-    text = await synthesize(files, ictDateLabel(nowMs));
-    if (!text) text = templateBrief(files);
+    text = await synthesize(files, items, ictDateLabel(nowMs));
+    if (!text) text = templateBrief(files, items);
   } catch (err) {
     console.warn("[summary] synthesis failed, using template:", err);
-    text = templateBrief(files);
+    text = templateBrief(files, items);
   }
 
   return {
     date:       ictDateLabel(nowMs),
-    count:      files.length,
+    count:      files.length + items.length,
     text,
     highlights: files.slice(0, MAX_HIGHLIGHTS),
     captures:   files,

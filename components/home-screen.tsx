@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Home, Search, FolderOpen, User } from "lucide-react";
+import { Home, Search, FolderOpen, User, Newspaper } from "lucide-react";
 import { HomeTab } from "@/components/screens/home-tab";
 import { FoldersTab } from "@/components/screens/folders-tab";
 import { ProfileTab } from "@/components/screens/profile-tab";
 import { SearchScreen } from "@/components/screens/search-screen";
+import { TimelineTab } from "@/components/screens/timeline-tab";
 import { FileDetailSheet } from "@/components/file-detail-sheet";
 import { ImageLightbox } from "@/components/image-lightbox";
 import { UploadFab } from "@/components/upload-fab";
@@ -16,7 +17,7 @@ import { useWorkspace } from "@/providers/workspace-provider";
 import { apiFetch } from "@/lib/api-client";
 import type { FileItem } from "@/types/file";
 
-type NavId = "home" | "search" | "folders" | "profile";
+type NavId = "home" | "timeline" | "search" | "folders" | "profile";
 
 interface HomeScreenProps {
   displayName?: string;
@@ -73,6 +74,14 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
     })();
   }, [setCurrentWorkspace]);
 
+  // ── Deep link to a tab (capture result bubble → ?tab=timeline) ────────────
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab === "timeline" || tab === "folders" || tab === "profile" || tab === "home") {
+      setActiveNav(tab as NavId);
+    }
+  }, []);
+
   // Per-user layout: keys are users/{userId}/uploads/... so match the
   // segment, not a startsWith.
   const unsortedCount = files.filter((f) => f.id.includes("/uploads/")).length;
@@ -80,10 +89,11 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
   const { tr } = useLanguage();
 
   const NAV_ITEMS = [
-    { id: "home"    as NavId, label: tr.navHome,    icon: Home      },
-    { id: "search"  as NavId, label: tr.navSearch,  icon: Search    },
-    { id: "folders" as NavId, label: tr.navFolders, icon: FolderOpen },
-    { id: "profile" as NavId, label: tr.navProfile, icon: User      },
+    { id: "home"     as NavId, label: tr.navHome,     icon: Home       },
+    { id: "timeline" as NavId, label: tr.navTimeline, icon: Newspaper  },
+    { id: "search"   as NavId, label: tr.navSearch,   icon: Search     },
+    { id: "folders"  as NavId, label: tr.navFolders,  icon: FolderOpen },
+    { id: "profile"  as NavId, label: tr.navProfile,  icon: User       },
   ];
 
   function navigate(tab: string) {
@@ -108,6 +118,7 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
           foldersLoading={foldersLoading}
         />
       )}
+      {activeNav === "timeline" && <TimelineTab />}
       {activeNav === "folders" && (
         <FoldersTab
           folders={folders}
