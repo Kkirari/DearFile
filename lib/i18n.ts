@@ -9,6 +9,16 @@ export const t = {
     navFolders:  "Folders",
     navProfile:  "Profile",
 
+    // Timeline calendar
+    timelineSubtitle:        "Your days, summarized",
+    timelineSummaryLabel:    "AI summary",
+    timelineNoSummary:       "No summary for this day",
+    timelineFilesSection:    "Files",
+    timelineCapturesSection: "Notes & links",
+    timelineEmptyDay:        "Nothing saved on this day",
+    timelineSummarizing:     "summarizing…",
+    timelineWeekdays:        "S,M,T,W,T,F,S",
+
     // Header
     greeting: "Hello",
     tagline:  "Your file storage",
@@ -150,6 +160,16 @@ export const t = {
     navSearch:   "ค้นหา",
     navFolders:  "โฟลเดอร์",
     navProfile:  "โปรไฟล์",
+
+    // Timeline calendar
+    timelineSubtitle:        "สรุปแต่ละวันของคุณ",
+    timelineSummaryLabel:    "สรุปโดย AI",
+    timelineNoSummary:       "ยังไม่มีสรุปของวันนี้",
+    timelineFilesSection:    "ไฟล์",
+    timelineCapturesSection: "โน้ตและลิงก์",
+    timelineEmptyDay:        "ไม่มีรายการในวันนี้",
+    timelineSummarizing:     "กำลังสรุป…",
+    timelineWeekdays:        "อา,จ,อ,พ,พฤ,ศ,ส",
 
     // Header
     greeting: "สวัสดี",

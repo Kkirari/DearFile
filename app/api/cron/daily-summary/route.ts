@@ -29,7 +29,7 @@ import { s3, BUCKET } from "@/lib/s3";
 import { pushMessage, summaryBubble } from "@/lib/line";
 import { buildDailySummary, ictDateLabel } from "@/lib/summary";
 import { drainCaptures } from "@/lib/capture";
-import { listUserIdsWithContent } from "@/lib/db";
+import { listUserIdsWithContent, upsertDailySummary } from "@/lib/db";
 
 // Long-running: one model call + one push per active user, processed in
 // bounded chunks. Default function timeout is 300s; be explicit.
@@ -180,6 +180,20 @@ export async function GET(req: Request) {
             files: summary.highlights.map((e) => e.filename),
           });
           return;
+        }
+
+        // Persist the recap so the calendar Timeline can show it later
+        // (best-effort: a DB hiccup must not block the push).
+        try {
+          await upsertDailySummary({
+            userId,
+            date,
+            text:      summary.text,
+            fileCount: summary.captures.length,
+            itemCount: summary.count - summary.captures.length,
+          });
+        } catch (err) {
+          console.warn(`[cron/daily-summary] persist failed for ${userId}:`, err);
         }
 
         if (!force) {
