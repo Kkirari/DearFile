@@ -96,16 +96,18 @@ async function fetchWebContent(url: string): Promise<{ title: string | null; tex
 // ── Summarize + classify ────────────────────────────────────────────────────
 
 const AnalysisSchema = z.object({
-  summary: z.string().describe("A concise summary in the content's own language."),
+  summary: z.string().describe("A concise summary written in Thai (ภาษาไทย)."),
   category: z.string().describe("One short category, e.g. article, video, tech, finance, study, news."),
-  tags: z.array(z.string()).max(8).describe("0–8 short topical tags."),
-  lang: z.string().describe('BCP-47-ish language code, e.g. "th" or "en".'),
+  // No hard .max() — Haiku sometimes returns more, which would fail schema
+  // validation and drop the whole (good) summary. We clamp in code instead.
+  tags: z.array(z.string()).describe("Up to 8 short topical tags."),
+  lang: z.string().describe('BCP-47-ish language code of the SOURCE content, e.g. "th" or "en".'),
 });
 
 function systemFor(style: Style): string {
   const base = [
     "You are DearFile (น้องกวาง), summarizing something a user saved to their second brain.",
-    "Reply in the SAME language as the content (Thai or English).",
+    "ALWAYS write the summary in Thai (ภาษาไทย), even when the source content is in another language — translate the key points into natural Thai.",
     "Base everything ONLY on the provided text — never invent facts.",
     "Never output a person's, pet's, or individual's name.",
     "No markdown headers and no URLs in the summary.",
@@ -130,12 +132,14 @@ async function analyze(content: string, style: Style): Promise<Analysis> {
       system:          systemFor(style),
       prompt:          content.slice(0, MAX_ANALYZE_CHARS),
       schema:          AnalysisSchema,
-      maxOutputTokens: 600,
+      // Thai is far more token-heavy than English; a 5-bullet Thai summary needs
+      // generous room or generateObject truncates the JSON mid-string and throws.
+      maxOutputTokens: 1500,
     });
     return {
       summary:  object.summary.trim(),
       category: object.category?.trim() || null,
-      tags:     object.tags ?? [],
+      tags:     (object.tags ?? []).slice(0, 8),
       lang:     object.lang?.trim() || null,
     };
   } catch (err) {
