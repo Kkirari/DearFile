@@ -264,6 +264,7 @@ export interface DailySummaryRecord {
   text: string;
   fileCount: number;
   itemCount: number;
+  createdAt: string;  // when this recap was last (re)generated — drives the today TTL
 }
 
 interface DailySummaryRow {
@@ -271,17 +272,20 @@ interface DailySummaryRow {
   text: string;
   file_count: number;
   item_count: number;
+  created_at: string | Date;
 }
 
 /** Fetch a stored recap for one ICT day, or null if none has been generated. */
 export async function getDailySummary(userId: string, date: string): Promise<DailySummaryRecord | null> {
   const rows = await q<DailySummaryRow>(
-    `SELECT date, text, file_count, item_count
+    `SELECT date, text, file_count, item_count, created_at
      FROM daily_summaries WHERE user_id = $1 AND date = $2`,
     [userId, date],
   );
   const r = rows[0];
-  return r ? { date: r.date, text: r.text, fileCount: r.file_count, itemCount: r.item_count } : null;
+  return r
+    ? { date: r.date, text: r.text, fileCount: r.file_count, itemCount: r.item_count, createdAt: toIso(r.created_at)! }
+    : null;
 }
 
 /** Insert or overwrite a day's recap (the 20:00 cron may refresh today's). */
