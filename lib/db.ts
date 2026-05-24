@@ -166,7 +166,7 @@ export async function listItems(
   userId: string,
   opts: { limit?: number; beforeIso?: string } = {},
 ): Promise<ContentItem[]> {
-  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 100);
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
   if (opts.beforeIso) {
     const rows = await q<ContentItemRow>(
       `SELECT * FROM content_items
@@ -191,6 +191,22 @@ export async function listReadyItemsSince(userId: string, sinceIso: string): Pro
      WHERE user_id = $1 AND status = 'ready' AND created_at >= $2
      ORDER BY created_at DESC`,
     [userId, sinceIso],
+  );
+  return rows.map(mapItem);
+}
+
+/** Ready captures created within [startIso, endIso) — a single day's recap. */
+export async function listReadyItemsBetween(
+  userId: string,
+  startIso: string,
+  endIso: string,
+): Promise<ContentItem[]> {
+  const rows = await q<ContentItemRow>(
+    `SELECT * FROM content_items
+     WHERE user_id = $1 AND status = 'ready'
+       AND created_at >= $2 AND created_at < $3
+     ORDER BY created_at DESC`,
+    [userId, startIso, endIso],
   );
   return rows.map(mapItem);
 }
@@ -238,5 +254,52 @@ export async function insertChunk(input: {
     `INSERT INTO chunks (content_item_id, content, embedding)
      VALUES ($1, $2, $3::vector)`,
     [input.contentItemId, input.content, vec],
+  );
+}
+
+// ── daily_summaries (persisted recaps for the calendar) ─────────────────────
+
+export interface DailySummaryRecord {
+  date: string;       // YYYY-MM-DD (ICT)
+  text: string;
+  fileCount: number;
+  itemCount: number;
+}
+
+interface DailySummaryRow {
+  date: string;
+  text: string;
+  file_count: number;
+  item_count: number;
+}
+
+/** Fetch a stored recap for one ICT day, or null if none has been generated. */
+export async function getDailySummary(userId: string, date: string): Promise<DailySummaryRecord | null> {
+  const rows = await q<DailySummaryRow>(
+    `SELECT date, text, file_count, item_count
+     FROM daily_summaries WHERE user_id = $1 AND date = $2`,
+    [userId, date],
+  );
+  const r = rows[0];
+  return r ? { date: r.date, text: r.text, fileCount: r.file_count, itemCount: r.item_count } : null;
+}
+
+/** Insert or overwrite a day's recap (the 20:00 cron may refresh today's). */
+export async function upsertDailySummary(input: {
+  userId: string;
+  date: string;
+  text: string;
+  fileCount: number;
+  itemCount: number;
+}): Promise<void> {
+  await q(
+    `INSERT INTO daily_summaries (user_id, date, text, file_count, item_count)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (user_id, date)
+     DO UPDATE SET text = EXCLUDED.text,
+                   file_count = EXCLUDED.file_count,
+                   item_count = EXCLUDED.item_count,
+                   created_at = now()`,
+    [input.userId, input.date, input.text, input.fileCount, input.itemCount],
   );
 }

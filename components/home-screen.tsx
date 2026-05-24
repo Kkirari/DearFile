@@ -118,7 +118,14 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
           foldersLoading={foldersLoading}
         />
       )}
-      {activeNav === "timeline" && <TimelineTab />}
+      {activeNav === "timeline" && (
+        <TimelineTab
+          files={files}
+          filesLoading={filesLoading}
+          folders={folders}
+          onRefresh={refreshFiles}
+        />
+      )}
       {activeNav === "folders" && (
         <FoldersTab
           folders={folders}

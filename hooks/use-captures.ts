@@ -21,7 +21,9 @@ export function useCaptures(): UseCapturesResult {
     try {
       setLoading(true);
       setError(null);
-      const res = await apiFetch("/api/captures");
+      // Wide window so the calendar can mark/drill into past days.
+      // (Cursor pagination for very long histories is a later improvement.)
+      const res = await apiFetch("/api/captures?limit=300");
       if (!res.ok) throw new Error(`Failed to fetch captures (${res.status})`);
       const data = (await res.json()) as { items: Capture[] };
       setItems(data.items);

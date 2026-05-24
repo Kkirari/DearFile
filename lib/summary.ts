@@ -26,7 +26,7 @@ import { generateText } from "ai";
 import { getAllEntries, type IndexEntry } from "./search-index";
 import { getAiFolder } from "./ai-folders";
 import { resolveModel } from "./ask";
-import { listReadyItemsSince, type ContentItem } from "./db";
+import { listReadyItemsBetween, type ContentItem } from "./db";
 
 const DEFAULT_MODEL = "anthropic/claude-haiku-4-5";
 const ICT_OFFSET_MS = 7 * 60 * 60 * 1000;   // Thailand is UTC+7, no DST
@@ -60,19 +60,26 @@ export function ictDateLabel(nowMs = Date.now()): string {
   return new Date(nowMs + ICT_OFFSET_MS).toISOString().slice(0, 10);
 }
 
+/** Start of a given ICT date (YYYY-MM-DD) as epoch ms (UTC). */
+export function ictDayStartMsForDate(date: string): number {
+  const [y, m, d] = date.split("-").map(Number);
+  return Date.UTC(y, (m ?? 1) - 1, d ?? 1) - ICT_OFFSET_MS;
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 // ── Capture collection + breakdown ─────────────────────────────────────────
 
 function folderName(e: IndexEntry): string {
   return getAiFolder(e.ai_folder_id)?.name ?? "📥 Inbox";
 }
 
-/** Files whose createdAt falls within today's ICT window, newest first. */
-function capturesToday(entries: IndexEntry[], nowMs = Date.now()): IndexEntry[] {
-  const start = ictDayStartMs(nowMs);
+/** Files whose createdAt falls within [startMs, endMs), newest first. */
+function capturesInWindow(entries: IndexEntry[], startMs: number, endMs: number): IndexEntry[] {
   return entries
     .filter((e) => {
       const t = Date.parse(e.createdAt);
-      return Number.isFinite(t) && t >= start && t <= nowMs;
+      return Number.isFinite(t) && t >= startMs && t < endMs;
     })
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
 }
@@ -142,20 +149,27 @@ function templateBrief(files: IndexEntry[], items: ContentItem[]): string {
 // ── Public API ────────────────────────────────────────────────────────────
 
 /**
- * Build today's brief for a user, or null when nothing was captured today
- * (callers skip the push/reply entirely — no "you saved nothing" spam).
- * Covers both S3 files and Neon notes/links; the latter is best-effort so the
- * recap still works if the DB isn't provisioned yet.
+ * Build the brief for one ICT calendar day (YYYY-MM-DD), or null when that day
+ * has no files and no ready notes/links. Covers both S3 files and Neon
+ * notes/links; the latter is best-effort so it still works if the DB isn't
+ * provisioned. Backs the calendar Timeline's per-day "summary of the past".
  */
-export async function buildDailySummary(
+export async function buildSummaryForDate(
   userId: string,
-  nowMs = Date.now(),
+  date: string,
 ): Promise<DailySummary | null> {
-  const files = capturesToday(await getAllEntries(userId), nowMs);
+  const startMs = ictDayStartMsForDate(date);
+  const endMs   = startMs + DAY_MS;
+
+  const files = capturesInWindow(await getAllEntries(userId), startMs, endMs);
 
   let items: ContentItem[] = [];
   try {
-    items = await listReadyItemsSince(userId, new Date(ictDayStartMs(nowMs)).toISOString());
+    items = await listReadyItemsBetween(
+      userId,
+      new Date(startMs).toISOString(),
+      new Date(endMs).toISOString(),
+    );
   } catch (err) {
     console.warn("[summary] content_items unavailable (DB not provisioned?):", err);
   }
@@ -164,7 +178,7 @@ export async function buildDailySummary(
 
   let text: string;
   try {
-    text = await synthesize(files, items, ictDateLabel(nowMs));
+    text = await synthesize(files, items, date);
     if (!text) text = templateBrief(files, items);
   } catch (err) {
     console.warn("[summary] synthesis failed, using template:", err);
@@ -172,10 +186,22 @@ export async function buildDailySummary(
   }
 
   return {
-    date:       ictDateLabel(nowMs),
+    date,
     count:      files.length + items.length,
     text,
     highlights: files.slice(0, MAX_HIGHLIGHTS),
     captures:   files,
   };
+}
+
+/**
+ * Build today's brief for a user, or null when nothing was captured today
+ * (callers skip the push/reply entirely — no "you saved nothing" spam). Thin
+ * wrapper over buildSummaryForDate for the daily cron + the "/summary" command.
+ */
+export async function buildDailySummary(
+  userId: string,
+  nowMs = Date.now(),
+): Promise<DailySummary | null> {
+  return buildSummaryForDate(userId, ictDateLabel(nowMs));
 }
