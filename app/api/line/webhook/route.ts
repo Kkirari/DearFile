@@ -20,12 +20,15 @@
  */
 
 import { PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { after } from "next/server";
 import {
   answerBubble,
+  captureResultBubble,
   fetchGroupSummary,
   fetchLineContent,
   greetingBubble,
   helpBubble,
+  pushMessage,
   replyMessage,
   summaryBubble,
   uploadSuccessBubble,
@@ -52,6 +55,7 @@ import {
 } from "@/lib/search-index";
 import { askDearFile, type AskScope } from "@/lib/ask";
 import { buildDailySummary } from "@/lib/summary";
+import { ingestLink, ingestNote, processCapture } from "@/lib/capture";
 import { checkAndIncrementAsk } from "@/lib/rate-limit";
 import { routeIntent } from "@/lib/intent";
 import { invalidatePreviews } from "@/lib/previews-cache";
@@ -62,6 +66,10 @@ import {
   markOrphaned,
   type WorkspaceMeta,
 } from "@/lib/workspace";
+
+// Background capture processing runs in `after()` past the 200 response — give
+// the function room beyond the default for transcript fetch + summarize + embed.
+export const maxDuration = 60;
 
 // ── Allow-lists / limits ──────────────────────────────────────────────────
 
@@ -197,13 +205,14 @@ async function shouldSkipEvent(event: LineEvent): Promise<boolean> {
  * key) and optionally `ws` (workspace id) to deep-link straight to that file —
  * LIFF forwards the query to the endpoint, where home-screen.tsx reads it.
  */
-function liffUrl(params?: { file?: string; ws?: string }): string {
+function liffUrl(params?: { file?: string; ws?: string; tab?: string }): string {
   const id = process.env.NEXT_PUBLIC_LIFF_ID;
   const base = id ? `https://liff.line.me/${id}` : "https://line.me";
-  if (!params?.file && !params?.ws) return base;
+  if (!params?.file && !params?.ws && !params?.tab) return base;
   const qs = new URLSearchParams();
   if (params.file) qs.set("file", params.file);
   if (params.ws)   qs.set("ws", params.ws);
+  if (params.tab)  qs.set("tab", params.tab);
   return `${base}?${qs.toString()}`;
 }
 
@@ -558,6 +567,71 @@ async function handleSummaryCommand(userId: string): Promise<LineMessage[]> {
   }
 }
 
+// ── Capture (notes / links → Timeline) ─────────────────────────────────────
+
+// Explicit "save this as a note" prefixes (English + Thai). A bare URL anywhere
+// in the message is also treated as a link capture.
+const NOTE_PREFIXES = ["/note", "/save", "/โน้ต", "บันทึก"];
+
+type CaptureRequest =
+  | { kind: "note"; text: string }
+  | { kind: "link"; url: string };
+
+/**
+ * Detect a capture in DM text: an explicit /note … (or Thai บันทึก …), or any
+ * URL in the message. Returns null when it's not a capture (→ falls through to
+ * the Ask flow, so questions are never mis-saved).
+ */
+function parseCaptureCommand(text: string): CaptureRequest | null {
+  const t = (text ?? "").trim();
+  if (!t) return null;
+  const lower = t.toLowerCase();
+  for (const p of NOTE_PREFIXES) {
+    if (lower.startsWith(p.toLowerCase())) {
+      const rest = t.slice(p.length).trim();
+      return rest ? { kind: "note", text: rest } : null;
+    }
+  }
+  const m = t.match(/https?:\/\/[^\s]+/i);
+  if (m) return { kind: "link", url: m[0] };
+  return null;
+}
+
+/**
+ * Process an already-ingested capture in the background and deliver the summary
+ * bubble — reply if still inside the token's single-use window, else push.
+ */
+function deliverCaptureInBackground(
+  id: string,
+  userId: string,
+  replyToken: string | undefined,
+): void {
+  after(async () => {
+    try {
+      const item = await processCapture(id);
+      if (!item) return;
+      const bubble = captureResultBubble(
+        {
+          type:      item.type,
+          title:     item.title,
+          summary:   item.summary,
+          sourceUrl: item.sourceUrl,
+          tags:      item.tags,
+        },
+        liffUrl({ tab: "timeline" }),
+      );
+      try {
+        if (replyToken) await replyMessage(replyToken, [bubble]);
+        else await pushMessage(userId, [bubble]);
+      } catch {
+        await pushMessage(userId, [bubble]); // reply token expired → push
+      }
+    } catch (err) {
+      console.error("[line/webhook] capture processing failed:", err);
+    }
+  });
+}
+
 /**
  * Run a question through the Ask engine and build the reply. Rate-limits per
  * LINE user first (a friendly cap message, no model call, when exceeded). Any
@@ -697,6 +771,27 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
 
     // On-demand daily recap: "/summary" · "สรุป" · "recap" · "สรุปวันนี้".
     if (isSummaryCommand(raw)) return handleSummaryCommand(userId);
+
+    // Capture: an explicit /note … or any URL → save to the Timeline. Ingest
+    // synchronously (a durable `pending` row), then process + deliver the summary
+    // in the background; return null so the webhook returns 200 fast.
+    const cap = parseCaptureCommand(raw);
+    if (cap) {
+      let id: string;
+      try {
+        id = cap.kind === "link"
+          ? await ingestLink(userId, cap.url)
+          : await ingestNote(userId, cap.text);
+      } catch (err) {
+        console.error("[line/webhook] capture ingest failed:", err);
+        return [{
+          type: "text",
+          text: "⚠️ บันทึกไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\nCouldn't save that right now — please try again.",
+        }];
+      }
+      deliverCaptureInBackground(id, userId, event.replyToken);
+      return null;
+    }
 
     const stripped = parseAskCommand(raw);
     const hadPrefix = stripped !== null;

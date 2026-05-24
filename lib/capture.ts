@@ -1,0 +1,257 @@
+/**
+ * Capture engine — Phase 7. Two stages, decoupled so the LINE webhook can ack
+ * instantly and the heavy work runs in the background (see the webhook's
+ * `after()` and the reconciliation cron):
+ *
+ *   ingestLink / ingestNote  → insert a `pending` row, return its id (no model)
+ *   processCapture(id)       → extract → summarize+classify → embed → `ready`
+ *
+ * Summarization routes through the same model resolver as Ask (Gateway by
+ * default, ASK_DIRECT_ANTHROPIC for local). YouTube uses transcript text
+ * (lib/youtube.ts) — never Gemini video ingestion. A model hiccup degrades to a
+ * template summary so a capture is never lost.
+ *
+ * Env: CAPTURE_MODEL_ID (default anthropic/claude-haiku-4-5).
+ */
+
+import { generateObject } from "ai";
+import { z } from "zod";
+import { resolveModel } from "./ask";
+import {
+  insertPendingItem,
+  claimForProcessing,
+  markReady,
+  markFailed,
+  getItem,
+  insertChunk,
+  listDueItemIds,
+  type ContentItem,
+} from "./db";
+import { embedOne, embeddingsEnabled } from "./embeddings";
+import { isYouTubeUrl, fetchYouTubeContent } from "./youtube";
+
+const DEFAULT_MODEL = "anthropic/claude-haiku-4-5";
+const MAX_ANALYZE_CHARS = 24_000; // cap model input (cost) — plenty for the main idea
+const WEB_BODY_CHARS = 6_000;
+
+type Style = "video" | "article" | "note";
+
+interface Analysis {
+  summary: string;
+  category: string | null;
+  tags: string[];
+  lang: string | null;
+}
+
+// ── Ingest (fast, synchronous) ──────────────────────────────────────────────
+
+export function ingestLink(userId: string, url: string): Promise<string> {
+  return insertPendingItem({ userId, type: "link", sourceUrl: url, rawText: url });
+}
+
+export function ingestNote(userId: string, text: string): Promise<string> {
+  return insertPendingItem({ userId, type: "note", rawText: text });
+}
+
+// ── Web (non-YouTube link) extraction — light, fetch-only ───────────────────
+
+function metaContent(html: string, key: string, attr: "property" | "name"): string | null {
+  const re = new RegExp(`<meta\\s+${attr}=["']${key}["']\\s+content=["']([^"']+)["']`, "i");
+  return html.match(re)?.[1] ?? null;
+}
+
+function stripTags(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function fetchWebContent(url: string): Promise<{ title: string | null; text: string }> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; DearFileBot/1.0)" },
+    });
+    if (!res.ok) return { title: null, text: url };
+    const html = await res.text();
+    const title =
+      metaContent(html, "og:title", "property") ??
+      html.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim() ??
+      null;
+    const description =
+      metaContent(html, "og:description", "property") ??
+      metaContent(html, "description", "name") ??
+      "";
+    const body = stripTags(html).slice(0, WEB_BODY_CHARS);
+    const text = [title, description, body].filter(Boolean).join("\n").trim();
+    return { title, text: text || url };
+  } catch {
+    return { title: null, text: url };
+  }
+}
+
+// ── Summarize + classify ────────────────────────────────────────────────────
+
+const AnalysisSchema = z.object({
+  summary: z.string().describe("A concise summary in the content's own language."),
+  category: z.string().describe("One short category, e.g. article, video, tech, finance, study, news."),
+  tags: z.array(z.string()).max(8).describe("0–8 short topical tags."),
+  lang: z.string().describe('BCP-47-ish language code, e.g. "th" or "en".'),
+});
+
+function systemFor(style: Style): string {
+  const base = [
+    "You are DearFile (น้องกวาง), summarizing something a user saved to their second brain.",
+    "Reply in the SAME language as the content (Thai or English).",
+    "Base everything ONLY on the provided text — never invent facts.",
+    "Never output a person's, pet's, or individual's name.",
+    "No markdown headers and no URLs in the summary.",
+  ];
+  if (style === "video") {
+    base.push(
+      "This is a YouTube transcript that may contain messy or auto-generated spelling errors — ignore them.",
+      "Extract the main idea and output 3–5 concise bullet points (use a leading '• ' on each line).",
+    );
+  } else if (style === "article") {
+    base.push("Summarize the page in 2–4 short sentences capturing the key point.");
+  } else {
+    base.push("Summarize/clean up the note in 1–3 short sentences; keep the user's intent.");
+  }
+  return base.join("\n");
+}
+
+async function analyze(content: string, style: Style): Promise<Analysis> {
+  try {
+    const { object } = await generateObject({
+      model:           resolveModel(process.env.CAPTURE_MODEL_ID ?? DEFAULT_MODEL),
+      system:          systemFor(style),
+      prompt:          content.slice(0, MAX_ANALYZE_CHARS),
+      schema:          AnalysisSchema,
+      maxOutputTokens: 600,
+    });
+    return {
+      summary:  object.summary.trim(),
+      category: object.category?.trim() || null,
+      tags:     object.tags ?? [],
+      lang:     object.lang?.trim() || null,
+    };
+  } catch (err) {
+    // Never lose a capture to a model hiccup — degrade to a raw excerpt.
+    console.warn("[capture] analyze failed, using template summary:", err);
+    return {
+      summary:  content.slice(0, 280).trim() || "(no preview available)",
+      category: style === "video" ? "video" : style === "note" ? "note" : "link",
+      tags:     [],
+      lang:     null,
+    };
+  }
+}
+
+function deriveTitle(item: ContentItem, fetchedTitle: string | null): string {
+  if (fetchedTitle) return fetchedTitle.slice(0, 200);
+  if (item.type === "note") {
+    const firstLine = item.rawText.split("\n")[0]?.trim() ?? "";
+    return (firstLine || "Note").slice(0, 80);
+  }
+  try {
+    return new URL(item.sourceUrl ?? "").hostname.replace(/^www\./, "");
+  } catch {
+    return "Link";
+  }
+}
+
+// ── Process (deferred) ──────────────────────────────────────────────────────
+
+/**
+ * Run extraction → summarize/classify → embed for one capture and flip it to
+ * `ready`. Idempotent: only claims `pending`/`failed` rows; a row already taken
+ * or done is returned as-is. Returns the final item (or null if it vanished).
+ */
+export async function processCapture(id: string): Promise<ContentItem | null> {
+  const claimed = await claimForProcessing(id);
+  if (!claimed) return getItem(id); // someone else has it, or it's already ready
+
+  try {
+    let style: Style;
+    let baseText: string;
+    let fetchedTitle: string | null = claimed.title;
+    let note: string | undefined;
+
+    if (claimed.type === "link") {
+      const url = claimed.sourceUrl ?? claimed.rawText;
+      if (isYouTubeUrl(url)) {
+        const yt = await fetchYouTubeContent(url);
+        fetchedTitle = yt.title ?? fetchedTitle;
+        baseText = yt.text;
+        note = yt.note;
+        style = "video";
+      } else {
+        const web = await fetchWebContent(url);
+        fetchedTitle = web.title ?? fetchedTitle;
+        baseText = web.text;
+        style = "article";
+      }
+    } else {
+      baseText = claimed.rawText;
+      style = "note";
+    }
+
+    const analysis = await analyze(baseText, style);
+    const summary = note ? `${note}\n\n${analysis.summary}` : analysis.summary;
+    const title = deriveTitle(claimed, fetchedTitle);
+
+    const ready = await markReady(id, {
+      title,
+      summary,
+      category: analysis.category,
+      tags:     analysis.tags,
+      lang:     analysis.lang,
+    });
+
+    // Embedding is best-effort — a capture stays usable even before Voyage is set
+    // up or if it errors; a later reprocess can backfill the chunk.
+    try {
+      if (embeddingsEnabled()) {
+        const vec = await embedOne([title, summary].filter(Boolean).join("\n"));
+        await insertChunk({ contentItemId: id, content: summary, embedding: vec });
+      }
+    } catch (embedErr) {
+      console.warn("[capture] embedding skipped:", embedErr);
+    }
+
+    return ready ?? getItem(id);
+  } catch (err) {
+    // Only unexpected (e.g. DB) errors land here — mark failed so the cron retries.
+    console.error("[capture] processing failed:", err);
+    await markFailed(id, err instanceof Error ? err.message : String(err)).catch(() => undefined);
+    return getItem(id);
+  }
+}
+
+const DRAIN_CONCURRENCY = 3;
+
+/**
+ * Process all captures that still need work (pending / retryable failed / stuck
+ * processing). The webhook's `after()` covers the happy path; this is the
+ * durable safety net, called by the reconciliation cron and by the daily-summary
+ * cron before the 20:00 recap.
+ */
+export async function drainCaptures(
+  limit = 25,
+): Promise<{ processed: number; ready: number; failed: number }> {
+  const ids = await listDueItemIds(limit);
+  let ready = 0;
+  let failed = 0;
+  for (let i = 0; i < ids.length; i += DRAIN_CONCURRENCY) {
+    const chunk = ids.slice(i, i + DRAIN_CONCURRENCY);
+    const results = await Promise.allSettled(chunk.map((id) => processCapture(id)));
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value?.status === "ready") ready++;
+      else failed++;
+    }
+  }
+  return { processed: ids.length, ready, failed };
+}

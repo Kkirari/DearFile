@@ -28,6 +28,8 @@ import { ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3, BUCKET } from "@/lib/s3";
 import { pushMessage, summaryBubble } from "@/lib/line";
 import { buildDailySummary, ictDateLabel } from "@/lib/summary";
+import { drainCaptures } from "@/lib/capture";
+import { listUserIdsWithContent } from "@/lib/db";
 
 // Long-running: one model call + one push per active user, processed in
 // bounded chunks. Default function timeout is 300s; be explicit.
@@ -130,9 +132,27 @@ export async function GET(req: Request) {
   const force  = url.searchParams.get("force") === "1" || dryRun;
   const date   = ictDateLabel();
 
+  // Make sure every same-day capture is processed before we synthesize the recap
+  // (the durable safety net for anything the webhook's background task dropped).
+  // Best-effort: a DB hiccup must not block the file-only summary.
+  try {
+    await drainCaptures(50);
+  } catch (err) {
+    console.warn("[cron/daily-summary] capture drain skipped:", err);
+  }
+
   let userIds: string[];
   try {
-    userIds = single ? [single] : await listUserIds();
+    if (single) {
+      userIds = [single];
+    } else {
+      // Union S3 file users with note/link-only users (who have no S3 prefix).
+      const [fileUsers, contentUsers] = await Promise.all([
+        listUserIds(),
+        listUserIdsWithContent().catch(() => [] as string[]),
+      ]);
+      userIds = [...new Set([...fileUsers, ...contentUsers])];
+    }
   } catch (err) {
     console.error("[cron/daily-summary] user enumeration failed:", err);
     return Response.json({ error: "enumeration failed" }, { status: 500 });

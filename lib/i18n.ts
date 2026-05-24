@@ -3,10 +3,11 @@ export type Lang = "en" | "th";
 export const t = {
   en: {
     // Nav
-    navHome:    "Home",
-    navSearch:  "Search",
-    navFolders: "Folders",
-    navProfile: "Profile",
+    navHome:     "Home",
+    navTimeline: "Timeline",
+    navSearch:   "Search",
+    navFolders:  "Folders",
+    navProfile:  "Profile",
 
     // Header
     greeting: "Hello",
@@ -144,10 +145,11 @@ export const t = {
 
   th: {
     // Nav
-    navHome:    "หน้าหลัก",
-    navSearch:  "ค้นหา",
-    navFolders: "โฟลเดอร์",
-    navProfile: "โปรไฟล์",
+    navHome:     "หน้าหลัก",
+    navTimeline: "ไทม์ไลน์",
+    navSearch:   "ค้นหา",
+    navFolders:  "โฟลเดอร์",
+    navProfile:  "โปรไฟล์",
 
     // Header
     greeting: "สวัสดี",

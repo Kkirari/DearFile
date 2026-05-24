@@ -630,6 +630,118 @@ export function summaryBubble(
 }
 
 /**
+ * Capture result bubble (Phase 7) — delivered by the background task after a
+ * note/link/YouTube capture is summarized. Shows the title, the AI summary, and
+ * tags, with a button into the LIFF Timeline tab (and, for links, the source).
+ */
+export interface CaptureView {
+  type: "note" | "link";
+  title: string | null;
+  summary: string | null;
+  sourceUrl: string | null;
+  tags?: string[] | null;
+}
+
+export function captureResultBubble(item: CaptureView, liffTimelineUrl: string): LineFlexMessage {
+  const icon = item.type === "link" ? "🔗" : "📝";
+  const title = item.title?.trim() || (item.type === "link" ? "Saved link" : "Saved note");
+  const summary = item.summary?.trim() || "—";
+  const tagLine = (item.tags ?? []).filter(Boolean).slice(0, 5).map((t) => `#${t}`).join("  ");
+
+  const bodyContents: unknown[] = [
+    {
+      type: "box",
+      layout: "baseline",
+      spacing: "sm",
+      contents: [
+        { type: "text", text: icon, flex: 0, size: "sm" },
+        {
+          type: "text",
+          text: title,
+          weight: "bold",
+          size: "sm",
+          color: TEXT_DARK_WARM,
+          flex: 1,
+          wrap: true,
+        },
+      ],
+    },
+    {
+      type: "text",
+      text: summary,
+      size: "sm",
+      color: TEXT_DARK_WARM,
+      wrap: true,
+      margin: "md",
+    },
+  ];
+  if (tagLine) {
+    bodyContents.push({ type: "text", text: tagLine, size: "xs", color: TEXT_TAUPE, wrap: true, margin: "md" });
+  }
+
+  const footerButtons: unknown[] = [
+    {
+      type: "button",
+      style: "primary",
+      color: BRAND_MAUVE,
+      height: "sm",
+      action: { type: "uri", label: "ดูใน DearFile / Open", uri: liffTimelineUrl },
+    },
+  ];
+  if (item.type === "link" && item.sourceUrl) {
+    footerButtons.push({
+      type: "button",
+      style: "secondary",
+      height: "sm",
+      action: { type: "uri", label: "เปิดลิงก์ / Source", uri: item.sourceUrl },
+    });
+  }
+
+  return {
+    type: "flex",
+    altText: `✓ บันทึกแล้ว: ${title} / Saved to Timeline`,
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      styles: {
+        header: { backgroundColor: BRAND_MAUVE },
+        body:   { backgroundColor: CARD_CREAM },
+        footer: { backgroundColor: CARD_CREAM },
+      },
+      header: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        contents: [
+          {
+            type: "text",
+            text: "✓ บันทึกลง Timeline / Saved",
+            weight: "bold",
+            color: "#FFFFFF",
+            size: "sm",
+          },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "20px",
+        spacing: "sm",
+        contents: bodyContents,
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        paddingTop: "0px",
+        spacing: "sm",
+        contents: footerButtons,
+      },
+    },
+  };
+}
+
+/**
  * Warm canned reply for greetings / small talk (the Hybrid Intent Router routes
  * non-question DM text here instead of paying for the Ask pipeline). A compact
  * bubble that nudges the user toward asking for a file, with an Open button.
