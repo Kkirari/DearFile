@@ -17,6 +17,7 @@ export const t = {
     timelineCapturesSection: "Notes & links",
     timelineEmptyDay:        "Nothing saved on this day",
     timelineSummarizing:     "summarizing…",
+    timelineResummarize:     "Re-summarize",
     timelineWeekdays:        "S,M,T,W,T,F,S",
 
     // Header
@@ -169,6 +170,7 @@ export const t = {
     timelineCapturesSection: "โน้ตและลิงก์",
     timelineEmptyDay:        "ไม่มีรายการในวันนี้",
     timelineSummarizing:     "กำลังสรุป…",
+    timelineResummarize:     "สรุปใหม่",
     timelineWeekdays:        "อา,จ,อ,พ,พฤ,ศ,ส",
 
     // Header

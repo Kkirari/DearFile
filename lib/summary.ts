@@ -154,10 +154,11 @@ function templateBrief(files: IndexEntry[], items: ContentItem[]): string {
  * notes/links; the latter is best-effort so it still works if the DB isn't
  * provisioned. Backs the calendar Timeline's per-day "summary of the past".
  */
-export async function buildSummaryForDate(
+/** Collect a day's files (S3 index) + ready notes/links (Neon) — no model call. */
+async function collectDayContent(
   userId: string,
   date: string,
-): Promise<DailySummary | null> {
+): Promise<{ files: IndexEntry[]; items: ContentItem[] }> {
   const startMs = ictDayStartMsForDate(date);
   const endMs   = startMs + DAY_MS;
 
@@ -173,6 +174,27 @@ export async function buildSummaryForDate(
   } catch (err) {
     console.warn("[summary] content_items unavailable (DB not provisioned?):", err);
   }
+
+  return { files, items };
+}
+
+/**
+ * Cheap content counts for a day (no model call) — used to detect when a cached
+ * recap is stale (new files/captures arrived since it was generated).
+ */
+export async function countDayContent(
+  userId: string,
+  date: string,
+): Promise<{ fileCount: number; itemCount: number }> {
+  const { files, items } = await collectDayContent(userId, date);
+  return { fileCount: files.length, itemCount: items.length };
+}
+
+export async function buildSummaryForDate(
+  userId: string,
+  date: string,
+): Promise<DailySummary | null> {
+  const { files, items } = await collectDayContent(userId, date);
 
   if (files.length === 0 && items.length === 0) return null;
 

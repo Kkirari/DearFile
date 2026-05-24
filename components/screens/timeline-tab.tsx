@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft, ChevronRight, RefreshCw, Sparkles, Loader2,
   Link2, FileText, Film, Music, Archive, Image as ImageIcon,
@@ -197,7 +197,18 @@ export function TimelineTab({ files, filesLoading, folders, onRefresh }: Timelin
                 {tr.timelineSummarizing}
               </div>
             ) : summary.data?.text ? (
-              <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-[#4a4036] dark:text-[#d8cabd]">{summary.data.text}</p>
+              <>
+                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-[#4a4036] dark:text-[#d8cabd]">{summary.data.text}</p>
+                {summary.data.stale && (
+                  <button
+                    onClick={() => summary.refresh()}
+                    className="mt-2.5 inline-flex items-center gap-1.5 rounded-full border border-[#9b869c]/30 bg-[#9b869c]/10 px-3 py-1 text-[12px] font-medium text-[#9b869c] active:scale-95 transition-transform"
+                  >
+                    <RefreshCw size={12} />
+                    {tr.timelineResummarize}
+                  </button>
+                )}
+              </>
             ) : (
               <p className="text-[13px] text-[#b0a396] dark:text-[#6e6460]">{tr.timelineNoSummary}</p>
             )}
@@ -259,12 +270,17 @@ export function TimelineTab({ files, filesLoading, folders, onRefresh }: Timelin
 
 // ── Per-day summary fetch ─────────────────────────────────────────────────────
 
-interface DaySummary { text: string; fileCount: number; itemCount: number }
+interface DaySummary { text: string; fileCount: number; itemCount: number; stale: boolean }
+
+type DayJson = { text?: string; fileCount?: number; itemCount?: number; stale?: boolean } | null;
+const toDay = (j: DayJson): DaySummary | null =>
+  j?.text ? { text: j.text, fileCount: j.fileCount ?? 0, itemCount: j.itemCount ?? 0, stale: !!j.stale } : null;
 
 function useDaySummary(date: string, enabled: boolean) {
   const [data, setData] = useState<DaySummary | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Initial load when the selected day changes (serves the cached recap).
   useEffect(() => {
     if (!enabled) { setData(null); setLoading(false); return; }
     let cancelled = false;
@@ -272,15 +288,26 @@ function useDaySummary(date: string, enabled: boolean) {
     setLoading(true);
     apiFetch(`/api/summary/day?date=${date}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((j: { text?: string; fileCount?: number; itemCount?: number } | null) => {
-        if (!cancelled) setData(j?.text ? { text: j.text, fileCount: j.fileCount ?? 0, itemCount: j.itemCount ?? 0 } : null);
-      })
+      .then((j: DayJson) => { if (!cancelled) setData(toDay(j)); })
       .catch(() => { if (!cancelled) setData(null); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [date, enabled]);
 
-  return { data, loading };
+  // Manual re-summarize (forces a rebuild) — only fired by the UI button.
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiFetch(`/api/summary/day?date=${date}&refresh=1`);
+      setData(toDay(res.ok ? await res.json() : null));
+    } catch {
+      /* keep the existing summary on error */
+    } finally {
+      setLoading(false);
+    }
+  }, [date]);
+
+  return { data, loading, refresh };
 }
 
 // ── Cards / rows ──────────────────────────────────────────────────────────────
