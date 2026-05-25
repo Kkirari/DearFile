@@ -257,6 +257,70 @@ export async function insertChunk(input: {
   );
 }
 
+/** A capture surfaced by semantic search, with its cosine similarity score. */
+export interface CaptureSearchHit {
+  id: string;
+  type: ContentType;
+  title: string | null;
+  summary: string | null;
+  sourceUrl: string | null;
+  tags: string[] | null;
+  createdAt: string;
+  score: number; // cosine similarity in [0,1], higher = closer
+}
+
+interface ChunkHitRow {
+  id: string;
+  type: ContentType;
+  title: string | null;
+  summary: string | null;
+  source_url: string | null;
+  tags: string[] | null;
+  created_at: string | Date;
+  score: number | string;
+}
+
+/**
+ * Semantic search over a user's ready captures via pgvector cosine distance.
+ * `embedding` is the query vector (Voyage). Returns the closest items, newest
+ * tie-break implicit in the index; deduped by content item.
+ */
+export async function searchChunks(
+  userId: string,
+  embedding: number[],
+  limit = 6,
+): Promise<CaptureSearchHit[]> {
+  const vec = `[${embedding.join(",")}]`;
+  const rows = await q<ChunkHitRow>(
+    `SELECT ci.id, ci.type, ci.title, ci.summary, ci.source_url, ci.tags, ci.created_at,
+            1 - (c.embedding <=> $2::vector) AS score
+     FROM chunks c
+     JOIN content_items ci ON ci.id = c.content_item_id
+     WHERE ci.user_id = $1 AND ci.status = 'ready'
+     ORDER BY c.embedding <=> $2::vector
+     LIMIT $3`,
+    [userId, vec, Math.min(Math.max(limit, 1), 50)],
+  );
+
+  const seen = new Set<string>();
+  const out: CaptureSearchHit[] = [];
+  for (const r of rows) {
+    if (seen.has(r.id)) continue;
+    seen.add(r.id);
+    out.push({
+      id:        r.id,
+      type:      r.type,
+      title:     r.title,
+      summary:   r.summary,
+      sourceUrl: r.source_url,
+      tags:      r.tags,
+      createdAt: toIso(r.created_at)!,
+      score:     Number(r.score),
+    });
+  }
+  return out;
+}
+
 // ── daily_summaries (persisted recaps for the calendar) ─────────────────────
 
 export interface DailySummaryRecord {

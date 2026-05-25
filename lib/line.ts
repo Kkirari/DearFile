@@ -448,11 +448,14 @@ export function helpBubble(liffUrl: string): LineFlexMessage {
  * separator, then `📄 {filename}` rows. With no citations (nothing matched)
  * the bubble is just the answer text.
  */
-export function answerBubble(
-  answer: string,
-  citations: IndexEntry[],
-  liffUrlFor: (entry: IndexEntry) => string,
-): LineFlexMessage {
+/** A tappable citation row in an answer bubble (icon + label → a deep link/URL). */
+export interface AnswerRow {
+  icon: string;
+  label: string;
+  uri: string;
+}
+
+export function answerBubble(answer: string, rows: AnswerRow[]): LineFlexMessage {
   const bodyContents: unknown[] = [
     {
       type: "text",
@@ -463,20 +466,20 @@ export function answerBubble(
     },
   ];
 
-  if (citations.length > 0) {
+  if (rows.length > 0) {
     bodyContents.push({ type: "separator", margin: "lg", color: BORDER_BEIGE });
-    for (const entry of citations) {
+    for (const row of rows) {
       bodyContents.push({
         type: "box",
         layout: "baseline",
         spacing: "sm",
         margin: "md",
-        action: { type: "uri", label: "เปิด / Open", uri: liffUrlFor(entry) },
+        action: { type: "uri", label: "เปิด / Open", uri: row.uri },
         contents: [
-          { type: "text", text: "📄", flex: 0, size: "sm" },
+          { type: "text", text: row.icon, flex: 0, size: "sm" },
           {
             type: "text",
-            text: entry.filename,
+            text: row.label,
             size: "sm",
             color: BRAND_MAUVE,
             weight: "bold",
