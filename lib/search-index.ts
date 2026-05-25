@@ -213,7 +213,17 @@ function bulkRemoveEntriesScoped(scope: Scope, keys: string[]): Promise<number> 
 // ── Public API: user-scoped (existing callers, unchanged signatures) ──────
 
 export function upsertEntry(userId: string, entry: IndexEntry): Promise<void> {
-  return upsertEntryScoped(userScope(userId), entry);
+  // Save to the S3 index, then best-effort embed for semantic file search.
+  // Dynamic import avoids a static import cycle with lib/file-search (which
+  // reads this module). A Voyage/DB hiccup must never break file indexing.
+  return upsertEntryScoped(userScope(userId), entry).then(async () => {
+    try {
+      const { indexFileEmbedding } = await import("./file-search");
+      await indexFileEmbedding(userId, entry);
+    } catch (err) {
+      console.warn("[search-index] file embed skipped:", err);
+    }
+  });
 }
 
 export function removeEntry(userId: string, key: string): Promise<void> {

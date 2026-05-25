@@ -26,8 +26,9 @@ import {
   type FilterMode,
 } from "./search-index";
 import { getAiFolder } from "./ai-folders";
-import { searchChunks, getUserProfile, type CaptureSearchHit } from "./db";
+import { searchChunks, getUserProfile, type CaptureSearchHit, type FileEmbeddingHit } from "./db";
 import { embedOne, embeddingsEnabled } from "./embeddings";
+import { searchFiles } from "./file-search";
 
 export type AskScope =
   | { kind: "user"; userId: string }
@@ -245,17 +246,36 @@ export async function askDearFile(scope: AskScope, question: string): Promise<As
     }),
     execute: async ({ query, filter, limit }) => {
       const n = limit ?? SEARCH_LIMIT_DEFAULT;
-      const [fileResults, noteResults] = await Promise.all([
-        runSearch(scope, query, (filter ?? "all") as FilterMode),
-        scope.kind === "user"
-          ? searchCaptures(scope.userId, query, n)
-          : Promise.resolve([] as CaptureSearchHit[]),
+      const fm = (filter ?? "all") as FilterMode;
+      const [keywordFiles, semFiles, noteResults] = await Promise.all([
+        runSearch(scope, query, fm),
+        scope.kind === "user" ? searchFiles(scope.userId, query, n) : Promise.resolve([] as FileEmbeddingHit[]),
+        scope.kind === "user" ? searchCaptures(scope.userId, query, n) : Promise.resolve([] as CaptureSearchHit[]),
       ]);
-      const files = fileResults.slice(0, n);
-      for (const r of files) recordFile(r, r.score);
+
+      // Merge keyword + semantic file hits by key (keep the higher score).
+      const fileMap = new Map<string, { entry: IndexEntry; score: number }>();
+      for (const r of keywordFiles) {
+        const prev = fileMap.get(r.key);
+        if (!prev || r.score > prev.score) fileMap.set(r.key, { entry: r, score: r.score });
+      }
+      if (semFiles.length) {
+        const byKey = new Map((await loadAll(scope)).map((e) => [e.key, e]));
+        const cat = fm === "all" ? null : FILTER_CATEGORY[fm];
+        for (const h of semFiles) {
+          const entry = byKey.get(h.fileKey);
+          if (!entry) continue;                          // moved/deleted → drop
+          if (cat && entry.category !== cat) continue;   // respect the filter
+          const prev = fileMap.get(entry.key);
+          if (!prev || h.score > prev.score) fileMap.set(entry.key, { entry, score: h.score });
+        }
+      }
+      const files = [...fileMap.values()].sort((a, b) => b.score - a.score).slice(0, n);
+      for (const f of files) recordFile(f.entry, f.score);
       for (const h of noteResults) recordCapture(h, h.score);
+
       return {
-        files: files.map((e) => ({
+        files: files.map(({ entry: e }) => ({
           key:      e.key,
           filename: e.filename,
           subject:  e.subject,

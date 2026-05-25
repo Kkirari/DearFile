@@ -415,3 +415,59 @@ export async function upsertUserProfile(input: {
 export async function deleteUserProfile(userId: string): Promise<void> {
   await q(`DELETE FROM user_profile WHERE user_id = $1`, [userId]);
 }
+
+// ── file_embeddings (semantic search over S3 files) ─────────────────────────
+
+export interface FileEmbeddingHit {
+  fileKey: string;
+  score: number; // cosine similarity in [0,1]
+}
+
+interface FileEmbeddingHitRow {
+  file_key: string;
+  score: number | string;
+}
+
+/** Insert or replace a file's embedding (keyed by user + S3 key). */
+export async function upsertFileEmbedding(input: {
+  userId: string;
+  fileKey: string;
+  content: string;
+  embedding: number[];
+}): Promise<void> {
+  const vec = `[${input.embedding.join(",")}]`;
+  await q(
+    `INSERT INTO file_embeddings (user_id, file_key, content, embedding, updated_at)
+     VALUES ($1, $2, $3, $4::vector, now())
+     ON CONFLICT (user_id, file_key)
+     DO UPDATE SET content = EXCLUDED.content, embedding = EXCLUDED.embedding, updated_at = now()`,
+    [input.userId, input.fileKey, input.content, vec],
+  );
+}
+
+/** Semantic search over a user's file embeddings (cosine). Returns key + score. */
+export async function searchFileEmbeddings(
+  userId: string,
+  embedding: number[],
+  limit = 6,
+): Promise<FileEmbeddingHit[]> {
+  const vec = `[${embedding.join(",")}]`;
+  const rows = await q<FileEmbeddingHitRow>(
+    `SELECT file_key, 1 - (embedding <=> $2::vector) AS score
+     FROM file_embeddings
+     WHERE user_id = $1 AND embedding IS NOT NULL
+     ORDER BY embedding <=> $2::vector
+     LIMIT $3`,
+    [userId, vec, Math.min(Math.max(limit, 1), 50)],
+  );
+  return rows.map((r) => ({ fileKey: r.file_key, score: Number(r.score) }));
+}
+
+/** Keys a user already has embedded — lets backfill skip done files. */
+export async function listEmbeddedFileKeys(userId: string): Promise<Set<string>> {
+  const rows = await q<{ file_key: string }>(
+    `SELECT file_key FROM file_embeddings WHERE user_id = $1`,
+    [userId],
+  );
+  return new Set(rows.map((r) => r.file_key));
+}
