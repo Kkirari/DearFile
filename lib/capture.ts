@@ -96,7 +96,7 @@ async function fetchWebContent(url: string): Promise<{ title: string | null; tex
 // ── Summarize + classify ────────────────────────────────────────────────────
 
 const AnalysisSchema = z.object({
-  summary: z.string().describe("A concise summary written in Thai (ภาษาไทย)."),
+  summary: z.string().describe("A structured Thai summary using the 📌 สรุป / 💡 ข้อมูลสำคัญ / ✨ เคล็ดลับเพิ่มเติม (จาก DearFile) / 🎯 เอาไปใช้ sections — or, for a short note, a cleaned 1–2 sentences plus one 🎯 tip."),
   category: z.string().describe("One short category, e.g. article, video, tech, finance, study, news."),
   // No hard .max() — Haiku sometimes returns more, which would fail schema
   // validation and drop the whole (good) summary. We clamp in code instead.
@@ -106,22 +106,36 @@ const AnalysisSchema = z.object({
 
 function systemFor(style: Style): string {
   const base = [
-    "You are DearFile (น้องกวาง), summarizing something a user saved to their second brain.",
-    "ALWAYS write the summary in Thai (ภาษาไทย), even when the source content is in another language — translate the key points into natural Thai.",
-    "Base everything ONLY on the provided text — never invent facts.",
+    "You are DearFile (น้องกวาง), a helpful second-brain assistant. The user saved this to come back to later — help them get real value from it.",
+    "ALWAYS write in Thai (ภาษาไทย), even if the source is in another language — render the key points in natural Thai.",
     "Never output a person's, pet's, or individual's name.",
-    "No markdown headers and no URLs in the summary.",
+    "Plain text only: no markdown headings (#), no raw URLs. Use the emoji section labels and '• ' bullets exactly as told.",
   ];
-  if (style === "video") {
+
+  // A user's own short note: keep it light — don't over-explain a reminder.
+  if (style === "note") {
     base.push(
-      "This is a YouTube transcript that may contain messy or auto-generated spelling errors — ignore them.",
-      "Extract the main idea and output 3–5 concise bullet points (use a leading '• ' on each line).",
+      "This is the user's own note. Clean it into 1–2 clear Thai sentences (keep their intent),",
+      "then on a new line add '🎯 ' with ONE short practical suggestion for acting on it. No other sections.",
     );
-  } else if (style === "article") {
-    base.push("Summarize the page in 2–4 short sentences capturing the key point.");
-  } else {
-    base.push("Summarize/clean up the note in 1–3 short sentences; keep the user's intent.");
+    return base.join("\n");
   }
+
+  base.push(
+    style === "video"
+      ? "This is a YouTube transcript; it may have messy/auto-generated typos — ignore the spelling and extract the real meaning."
+      : "This is a web page / article.",
+    "Write the summary in EXACTLY these four sections, in this order, each starting on its own line:",
+    "📌 สรุป",
+    "  • 3–5 bullets — the main context / key steps. Faithful to the SOURCE only.",
+    "💡 ข้อมูลสำคัญ",
+    "  • 1–3 bullets — the most important things to know or remember from it.",
+    "✨ เคล็ดลับเพิ่มเติม (จาก DearFile)",
+    "  • 1–3 bullets of YOUR OWN useful tips or background knowledge that are NOT in the source but help with this topic. This section is explicitly your addition — using general knowledge here is fine; keep it accurate and practical.",
+    "🎯 เอาไปใช้",
+    "  • 1–2 bullets — infer what the user likely wants this for and how to apply it.",
+    "Keep bullets concise. If the source lacks material for a section, write a brief best-effort line rather than inventing facts about the source.",
+  );
   return base.join("\n");
 }
 
@@ -132,9 +146,9 @@ async function analyze(content: string, style: Style): Promise<Analysis> {
       system:          systemFor(style),
       prompt:          content.slice(0, MAX_ANALYZE_CHARS),
       schema:          AnalysisSchema,
-      // Thai is far more token-heavy than English; a 5-bullet Thai summary needs
-      // generous room or generateObject truncates the JSON mid-string and throws.
-      maxOutputTokens: 1500,
+      // Thai is far more token-heavy than English; the 4-section structured Thai
+      // summary needs generous room or generateObject truncates the JSON and throws.
+      maxOutputTokens: 2000,
     });
     return {
       summary:  object.summary.trim(),

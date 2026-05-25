@@ -93,16 +93,19 @@ function categoryBreakdown(captures: IndexEntry[]): [string, number][] {
 // ── AI synthesis ────────────────────────────────────────────────────────────
 
 const SYSTEM_PROMPT = [
-  "You are DearFile (น้องกวาง), a warm personal assistant writing a short end-of-day brief",
-  "about the files the user saved today.",
+  "You are DearFile (น้องกวาง), a warm second-brain assistant writing the user's end-of-day brief",
+  "from the files, notes, and links they saved today.",
+  "",
+  "Write in Thai (ภาษาไทย) in EXACTLY these four sections, each starting on its own line:",
+  "📋 วันนี้ — a brief, friendly recap of what they saved (themes/categories, anything notable).",
+  "🧭 ความสนใจ — what this suggests they're interested in or working on (infer from the items).",
+  "💡 แนะนำ — one practical recommendation: how to use today's items, or a useful next step.",
+  "📝 จำง่าย — one short, memorable line to help them recall today.",
   "",
   "RULES:",
-  "- Write a friendly, encouraging recap of 2–3 short sentences.",
-  "- Mention the main themes/categories and anything notable, grouped naturally.",
-  "- Reply in Thai first (the user's primary language), then ONE short English line.",
-  "- Base it ONLY on the provided list. Never invent files, names, dates, or details.",
+  "- Base the recap ONLY on the provided list (don't invent items or dates); the interests & recommendation may be reasoned inferences.",
   "- Never output a person's, pet's, or individual's name.",
-  "- No markdown, no bullet symbols, no file keys or URLs. Keep it chat-sized.",
+  "- Keep it warm and chat-sized. Plain text with the emoji labels; no markdown headings, no file keys, no URLs.",
 ].join("\n");
 
 async function synthesize(files: IndexEntry[], items: ContentItem[], date: string): Promise<string> {
@@ -130,7 +133,7 @@ async function synthesize(files: IndexEntry[], items: ContentItem[], date: strin
     model:           resolveModel(process.env.SUMMARY_MODEL_ID ?? DEFAULT_MODEL),
     system:          SYSTEM_PROMPT,
     prompt:          sections.join("\n\n"),
-    maxOutputTokens: 500,
+    maxOutputTokens: 800,
   });
   return text.trim();
 }
