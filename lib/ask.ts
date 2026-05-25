@@ -26,7 +26,7 @@ import {
   type FilterMode,
 } from "./search-index";
 import { getAiFolder } from "./ai-folders";
-import { searchChunks, type CaptureSearchHit } from "./db";
+import { searchChunks, getUserProfile, type CaptureSearchHit } from "./db";
 import { embedOne, embeddingsEnabled } from "./embeddings";
 
 export type AskScope =
@@ -296,9 +296,23 @@ export async function askDearFile(scope: AskScope, question: string): Promise<As
     },
   });
 
+  // Personalize with the user's interest profile (best-effort, user scope only).
+  let system = SYSTEM_PROMPT;
+  if (scope.kind === "user") {
+    try {
+      const profile = await getUserProfile(scope.userId);
+      if (profile && (profile.interests.length || profile.about)) {
+        system +=
+          `\n\nAbout this user (for tailoring suggestions, not for inventing answers):` +
+          (profile.interests.length ? `\n- interests: ${profile.interests.join(", ")}` : "") +
+          (profile.about ? `\n- ${profile.about}` : "");
+      }
+    } catch { /* no profile → answer as usual */ }
+  }
+
   const result = await generateText({
     model:           resolveModel(process.env.ASK_MODEL_ID ?? DEFAULT_MODEL),
-    system:          SYSTEM_PROMPT,
+    system,
     prompt:          question,
     tools:           { search, get_file_detail },
     stopWhen:        stepCountIs(4),

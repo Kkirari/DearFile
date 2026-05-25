@@ -27,9 +27,10 @@
 import { ListObjectsV2Command, PutObjectCommand } from "@aws-sdk/client-s3";
 import { s3, BUCKET } from "@/lib/s3";
 import { pushMessage, summaryBubble } from "@/lib/line";
-import { buildDailySummary, ictDateLabel } from "@/lib/summary";
+import { buildDailySummary, collectDayContent, ictDateLabel } from "@/lib/summary";
 import { drainCaptures } from "@/lib/capture";
 import { listUserIdsWithContent, upsertDailySummary } from "@/lib/db";
+import { updateUserProfile } from "@/lib/profile";
 
 // Long-running: one model call + one push per active user, processed in
 // bounded chunks. Default function timeout is 300s; be explicit.
@@ -194,6 +195,15 @@ export async function GET(req: Request) {
           });
         } catch (err) {
           console.warn(`[cron/daily-summary] persist failed for ${userId}:`, err);
+        }
+
+        // Learn/refresh the user's interest profile from today's content
+        // (best-effort, once a day — the Phase 9 memory write path).
+        try {
+          const { files, items } = await collectDayContent(userId, date);
+          await updateUserProfile(userId, files, items);
+        } catch (err) {
+          console.warn(`[cron/daily-summary] profile update skipped for ${userId}:`, err);
         }
 
         if (!force) {

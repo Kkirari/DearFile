@@ -20,6 +20,12 @@ export const t = {
     timelineResummarize:     "Re-summarize",
     timelineWeekdays:        "S,M,T,W,T,F,S",
 
+    // About you (memory / persona)
+    aboutYouTitle:    "What DearFile knows",
+    aboutYouInterests:"Interests",
+    aboutYouEmpty:    "Save more and DearFile will learn what you're into.",
+    clearMemory:      "Clear",
+
     // Header
     greeting: "Hello",
     tagline:  "Your file storage",
@@ -172,6 +178,12 @@ export const t = {
     timelineSummarizing:     "กำลังสรุป…",
     timelineResummarize:     "สรุปใหม่",
     timelineWeekdays:        "อา,จ,อ,พ,พฤ,ศ,ส",
+
+    // About you (memory / persona)
+    aboutYouTitle:    "DearFile รู้จักคุณ",
+    aboutYouInterests:"ความสนใจ",
+    aboutYouEmpty:    "บันทึกเพิ่มอีกหน่อย แล้ว DearFile จะเรียนรู้ความสนใจของคุณ",
+    clearMemory:      "ล้าง",
 
     // Header
     greeting: "สวัสดี",
