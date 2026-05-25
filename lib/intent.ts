@@ -17,7 +17,7 @@ import { generateObject } from "ai";
 import { z } from "zod";
 import { resolveModel } from "./ask";
 
-export type Intent = "ask" | "greeting" | "help" | "noise";
+export type Intent = "ask" | "greeting" | "help" | "noise" | "note";
 export interface Decision {
   intent: Intent;
   via: "rules" | "llm";
@@ -48,6 +48,12 @@ const ASK_TH = [
   "ไฟล์", "รูป", "ภาพ", "เอกสาร", "ใบเสร็จ", "ใบกำกับ", "สัญญา", "รายงาน",
   "วิดีโอ", "คลิป", "สลิป", "โน้ต", "สกรีนช็อต", "หา", "ค้นหา", "อยู่ไหน", "ขอดู",
 ];
+
+// NOTE cues — explicit "save this thought" markers (high precision). Matched on
+// the punctuation-stripped, lowercased text. Only used when NO ask cue is present,
+// so a question is never mis-saved (e.g. "remember to find my receipt" → ask).
+const NOTE_EN = /^(note|todo|to do|remember|remind me|reminder|dont forget|idea|fyi)\b/;
+const NOTE_TH = ["อย่าลืม", "จดว่า", "จดไว้", "โน้ตว่า", "เตือนว่า", "เตือนความจำ", "บันทึกว่า"];
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -88,6 +94,12 @@ function hasAskCue(text: string): boolean {
   return false;
 }
 
+function hasNoteCue(text: string): boolean {
+  if (NOTE_EN.test(text)) return true;
+  if (NOTE_TH.some((w) => text.includes(w))) return true;
+  return false;
+}
+
 function isNoise(original: string): boolean {
   const stripped = original.replace(EMOJI, "").replace(/[\s\p{P}\p{S}]/gu, "");
   return stripped.length === 0; // emoji / punctuation / whitespace only
@@ -97,9 +109,9 @@ function isNoise(original: string): boolean {
 
 /**
  * Classify by rules alone. Returns a concrete Intent or "unsure".
- * Precedence: noise → strong_ask → greeting → help → unsure.
- * (strong_ask before greeting so a Thai "สวัสดีครับมีไฟล์…" — one space-less
- * token — isn't shadowed by its greeting prefix.)
+ * Precedence: noise → strong_ask → note → greeting → help → unsure.
+ * (strong_ask before note/greeting so a question with a reminder word — e.g.
+ * "remember to find my receipt" — stays an ask, never a saved note.)
  */
 export function classifyByRules(text: string): Intent | "unsure" {
   const raw = text.trim();
@@ -110,6 +122,7 @@ export function classifyByRules(text: string): Intent | "unsure" {
   if (!v) return "noise";
 
   if (hasAskCue(v)) return "ask";
+  if (hasNoteCue(v)) return "note";
 
   const tokens = v.split(/\s+/).filter(Boolean);
   if (tokens.length > 0 && tokens.every(isGreetingToken)) return "greeting";
@@ -122,11 +135,12 @@ export function classifyByRules(text: string): Intent | "unsure" {
 // ── Tier 2: small LLM classifier (flag-gated) ────────────────────────────────
 
 const INTENT_SYSTEM =
-  "Classify the user's chat message to a file-storage assistant into ONE intent:\n" +
+  "Classify the user's chat message to a personal file/notes assistant into ONE intent:\n" +
   '- "ask": they want to find, search, or ask about their saved files.\n' +
+  '- "note": a reminder, idea, or thought to SAVE for later — NOT a request to find anything.\n' +
   '- "greeting": a greeting, thanks, or small talk.\n' +
   '- "help": asking what the bot can do or how to use it.\n' +
-  "When unsure, choose \"ask\". Reply with the intent only.";
+  'When unsure, choose "ask" — never classify a real question as a note. Reply with the intent only.';
 
 /** Cheap single-shot classifier. Only call for "unsure" text. ASK-biased. */
 export async function classifyByLLM(text: string): Promise<Intent> {
@@ -135,7 +149,7 @@ export async function classifyByLLM(text: string): Promise<Intent> {
       model:  resolveModel(process.env.INTENT_MODEL_ID ?? DEFAULT_INTENT_MODEL),
       system: INTENT_SYSTEM,
       prompt: text,
-      schema: z.object({ intent: z.enum(["ask", "greeting", "help"]) }),
+      schema: z.object({ intent: z.enum(["ask", "greeting", "help", "note"]) }),
     });
     return object.intent;
   } catch (err) {
