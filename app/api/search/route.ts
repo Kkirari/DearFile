@@ -4,12 +4,14 @@ import { s3, BUCKET, isSafeWorkspaceId } from "@/lib/s3";
 import {
   searchScored,
   searchWorkspaceScored,
+  getAllEntries,
   countByFilter,
   countWorkspaceByFilter,
   type FilterMode,
   type SortMode,
   type ScoredEntry,
 } from "@/lib/search-index";
+import { searchFiles } from "@/lib/file-search";
 import type { FileItem } from "@/types/file";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 import { requireWorkspaceAccess } from "@/lib/workspace";
@@ -24,6 +26,11 @@ function asFilter(s: string | null): FilterMode {
   if (s === "photos" || s === "documents" || s === "finance" || s === "academic") return s;
   return "all";
 }
+
+// Filter chip → analyzer category (for filtering semantic-only hits).
+const FILTER_CATEGORY: Record<string, string> = {
+  photos: "photo", documents: "document", finance: "finance", academic: "academic",
+};
 
 function asSort(s: string | null): SortMode {
   if (s === "newest" || s === "oldest" || s === "largest") return s;
@@ -65,9 +72,33 @@ export async function GET(req: Request) {
       return Response.json({ files: [], query: "", counts });
     }
 
-    const entries = wsId
+    let entries: ScoredEntry[] = wsId
       ? await searchWorkspaceScored(wsId, q, { filter, sort })
       : await searchScored(userId, q, { filter, sort });
+
+    // Blend in semantic file matches (user scope, relevance sort, real query) so
+    // the Search tab finds files by meaning, not just keywords. Append misses
+    // not already in the keyword results; keyword hits keep their top ranking.
+    if (!wsId && q && sort === "relevance") {
+      try {
+        const sem = await searchFiles(userId, q, 10);
+        if (sem.length) {
+          const byKey = new Map((await getAllEntries(userId)).map((e) => [e.key, e]));
+          const present = new Set(entries.map((e) => e.key));
+          const cat = filter === "all" ? null : FILTER_CATEGORY[filter];
+          for (const h of sem) {
+            if (present.has(h.fileKey)) continue;
+            const e = byKey.get(h.fileKey);
+            if (!e) continue;
+            if (cat && e.category !== cat) continue;
+            entries.push({ ...e, score: h.score, matchedIn: ["meaning"] });
+          }
+          entries.sort((a, b) => b.score - a.score);
+        }
+      } catch (err) {
+        console.warn("[GET /api/search] semantic blend skipped:", err);
+      }
+    }
 
     const files: SearchResultItem[] = await Promise.all(
       entries.map(async (e: ScoredEntry) => {
