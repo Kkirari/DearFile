@@ -797,19 +797,37 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
     const hadPrefix = stripped !== null;
     const question = (hadPrefix ? stripped : raw).trim();
 
-    // Blank question, or nothing saved yet → onboarding help bubble instead of
-    // an "I found nothing" AI call.
+    // Blank message → onboarding help bubble.
     if (!question) return [helpBubble(liffUrl())];
-    const index = await getAllEntries(userId);
-    if (index.length === 0) return [helpBubble(liffUrl())];
 
     // An explicit /dearfile|/น้องกวาง prefix is an explicit ASK — skip the
     // router. Otherwise let the Hybrid Intent Router decide so greetings /
-    // help / noise don't pay for the Ask pipeline.
+    // help / noise don't pay for the Ask pipeline, and plain "notes to self"
+    // are auto-saved to the Timeline (ask-biased — questions are never saved).
     const intent = hadPrefix ? "ask" : (await routeIntent(question)).intent;
     switch (intent) {
-      case "ask":
+      case "note": {
+        // Smart auto-save: the router judged this a note → capture it like /note.
+        let id: string;
+        try {
+          id = await ingestNote(userId, question);
+        } catch (err) {
+          console.error("[line/webhook] note ingest failed:", err);
+          return [{
+            type: "text",
+            text: "⚠️ บันทึกไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\nCouldn't save that right now — please try again.",
+          }];
+        }
+        deliverCaptureInBackground(id, userId, event.replyToken);
+        return null;
+      }
+      case "ask": {
+        // Only Ask needs the file index; a fresh user with no files gets onboarding
+        // instead of an "I found nothing" AI call.
+        const index = await getAllEntries(userId);
+        if (index.length === 0) return [helpBubble(liffUrl())];
         return handleAskMessage({ kind: "user", userId }, userId, question);
+      }
       case "help":
         return [helpBubble(liffUrl())];
       case "greeting":
