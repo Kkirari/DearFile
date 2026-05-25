@@ -26,7 +26,7 @@ import { generateText } from "ai";
 import { getAllEntries, type IndexEntry } from "./search-index";
 import { getAiFolder } from "./ai-folders";
 import { resolveModel } from "./ask";
-import { listReadyItemsBetween, type ContentItem } from "./db";
+import { listReadyItemsBetween, getUserProfile, type ContentItem, type UserProfile } from "./db";
 
 const DEFAULT_MODEL = "anthropic/claude-haiku-4-5";
 const ICT_OFFSET_MS = 7 * 60 * 60 * 1000;   // Thailand is UTC+7, no DST
@@ -108,7 +108,12 @@ const SYSTEM_PROMPT = [
   "- Keep it warm and chat-sized. Plain text with the emoji labels; no markdown headings, no file keys, no URLs.",
 ].join("\n");
 
-async function synthesize(files: IndexEntry[], items: ContentItem[], date: string): Promise<string> {
+async function synthesize(
+  files: IndexEntry[],
+  items: ContentItem[],
+  date: string,
+  profile?: UserProfile | null,
+): Promise<string> {
   const fileLines = files
     .slice(0, MAX_FILES_TO_MODEL)
     .map((e) => {
@@ -126,6 +131,12 @@ async function synthesize(files: IndexEntry[], items: ContentItem[], date: strin
     });
 
   const sections: string[] = [`Date: ${date}`];
+  if (profile && (profile.interests.length || profile.about)) {
+    sections.push(
+      `User's longer-term interests (for 🧭/💡 context): ${profile.interests.join(", ")}` +
+      (profile.about ? `\nAbout the user: ${profile.about}` : ""),
+    );
+  }
   if (fileLines.length) sections.push(`Files saved today (${files.length}):\n${fileLines.join("\n")}`);
   if (itemLines.length) sections.push(`Notes & links saved today (${items.length}):\n${itemLines.join("\n")}`);
 
@@ -158,7 +169,7 @@ function templateBrief(files: IndexEntry[], items: ContentItem[]): string {
  * provisioned. Backs the calendar Timeline's per-day "summary of the past".
  */
 /** Collect a day's files (S3 index) + ready notes/links (Neon) — no model call. */
-async function collectDayContent(
+export async function collectDayContent(
   userId: string,
   date: string,
 ): Promise<{ files: IndexEntry[]; items: ContentItem[] }> {
@@ -201,9 +212,17 @@ export async function buildSummaryForDate(
 
   if (files.length === 0 && items.length === 0) return null;
 
+  // Personalize with the user's longer-term interest profile (best-effort).
+  let profile: UserProfile | null = null;
+  try {
+    profile = await getUserProfile(userId);
+  } catch (err) {
+    console.warn("[summary] profile unavailable:", err);
+  }
+
   let text: string;
   try {
-    text = await synthesize(files, items, date);
+    text = await synthesize(files, items, date, profile);
     if (!text) text = templateBrief(files, items);
   } catch (err) {
     console.warn("[summary] synthesis failed, using template:", err);

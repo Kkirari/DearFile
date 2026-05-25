@@ -20,6 +20,7 @@ import {
   LogOut,
 } from "lucide-react";
 import { formatBytes, getFileIcon } from "@/lib/utils";
+import { useProfile } from "@/hooks/use-profile";
 import { useLanguage } from "@/providers/language-provider";
 import { useTheme } from "@/providers/theme-provider";
 import { useLiff } from "@/providers/liff-provider";
@@ -40,6 +41,7 @@ export function ProfileTab({ displayName, pictureUrl, files, folders }: ProfileT
   const { lang, setLang, tr } = useLanguage();
   const { theme, setTheme }   = useTheme();
   const { logout }            = useLiff();
+  const { profile, loading: profileLoading, clear: clearProfile } = useProfile();
 
   const [confirmLogout, setConfirmLogout] = useState(false);
 
@@ -211,6 +213,49 @@ export function ProfileTab({ displayName, pictureUrl, files, folders }: ProfileT
           </div>
         </section>
       )}
+
+      {/* ── ABOUT YOU (interest memory / persona) ── */}
+      <section className="px-5 mt-5">
+        <div className="mb-3 flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <Sparkles size={13} className="text-[#9b869c]" />
+            <p className="t-body font-bold text-[#4a4036] dark:text-[#e8ddd4]">{tr.aboutYouTitle}</p>
+          </div>
+          {profile && (
+            <button
+              onClick={clearProfile}
+              className="t-caption font-medium text-[#b0a396] dark:text-[#6e6460] active:opacity-60"
+            >
+              {tr.clearMemory}
+            </button>
+          )}
+        </div>
+        <div className="rounded-2xl border border-[#9b869c]/20 bg-gradient-to-br from-[#9b869c]/[0.08] to-[#fbfaf6] dark:from-[#9b869c]/15 dark:to-[#252220] p-4 shadow-[0_1px_3px_rgba(74,64,54,0.06)]">
+          {profileLoading ? (
+            <div className="space-y-2 animate-pulse">
+              <div className="h-3 w-3/4 rounded bg-[#e0d8cc]/60 dark:bg-[#3a3430]/60" />
+              <div className="h-3 w-1/2 rounded bg-[#e0d8cc]/50 dark:bg-[#3a3430]/50" />
+            </div>
+          ) : profile ? (
+            <>
+              {profile.about && (
+                <p className="t-body leading-relaxed text-[#4a4036] dark:text-[#d8cabd]">{profile.about}</p>
+              )}
+              {profile.interests.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  {profile.interests.map((it) => (
+                    <span key={it} className="rounded-full bg-[#9b869c]/12 px-2.5 py-1 t-caption font-medium text-[#9b869c]">
+                      {it}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="t-body text-[#b0a396] dark:text-[#6e6460]">{tr.aboutYouEmpty}</p>
+          )}
+        </div>
+      </section>
 
       {/* ── SETTINGS ── */}
       <section className="px-5 mt-5">

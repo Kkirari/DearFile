@@ -371,3 +371,47 @@ export async function upsertDailySummary(input: {
     [input.userId, input.date, input.text, input.fileCount, input.itemCount],
   );
 }
+
+// ── user_profile (interest memory / persona) ────────────────────────────────
+
+export interface UserProfile {
+  interests: string[];
+  about: string | null;
+  updatedAt: string;
+}
+
+interface UserProfileRow {
+  interests: string[] | null;
+  about: string | null;
+  updated_at: string | Date;
+}
+
+/** The user's accumulated interest profile, or null if none built yet. */
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  const rows = await q<UserProfileRow>(
+    `SELECT interests, about, updated_at FROM user_profile WHERE user_id = $1`,
+    [userId],
+  );
+  const r = rows[0];
+  return r ? { interests: r.interests ?? [], about: r.about, updatedAt: toIso(r.updated_at)! } : null;
+}
+
+/** Insert or replace the user's profile (the daily learner overwrites it). */
+export async function upsertUserProfile(input: {
+  userId: string;
+  interests: string[];
+  about: string | null;
+}): Promise<void> {
+  await q(
+    `INSERT INTO user_profile (user_id, interests, about, updated_at)
+     VALUES ($1, $2, $3, now())
+     ON CONFLICT (user_id)
+     DO UPDATE SET interests = EXCLUDED.interests, about = EXCLUDED.about, updated_at = now()`,
+    [input.userId, input.interests, input.about],
+  );
+}
+
+/** Clear a user's profile (the Profile-tab "Clear" button). */
+export async function deleteUserProfile(userId: string): Promise<void> {
+  await q(`DELETE FROM user_profile WHERE user_id = $1`, [userId]);
+}
