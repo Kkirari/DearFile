@@ -656,7 +656,16 @@ async function handleAskMessage(
   try {
     const { answer, citations } = await askDearFile(scope, question);
     const wsId = scope.kind === "workspace" ? scope.workspaceId : undefined;
-    return [answerBubble(answer, citations, (e) => liffUrl({ file: e.key, ws: wsId }))];
+    const rows = citations.map((c) =>
+      c.kind === "file"
+        ? { icon: "📄", label: c.entry.filename, uri: liffUrl({ file: c.entry.key, ws: wsId }) }
+        : {
+            icon: c.itemType === "link" ? "🔗" : "📝",
+            label: c.title,
+            uri: c.itemType === "link" && c.sourceUrl ? c.sourceUrl : liffUrl({ tab: "timeline" }),
+          },
+    );
+    return [answerBubble(answer, rows)];
   } catch (err) {
     console.error("[line/webhook] ask failed:", err);
     return [{

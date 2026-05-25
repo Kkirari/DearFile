@@ -26,14 +26,25 @@ import {
   type FilterMode,
 } from "./search-index";
 import { getAiFolder } from "./ai-folders";
+import { searchChunks, type CaptureSearchHit } from "./db";
+import { embedOne, embeddingsEnabled } from "./embeddings";
 
 export type AskScope =
   | { kind: "user"; userId: string }
   | { kind: "workspace"; workspaceId: string };
 
+/**
+ * A cited source in an answer: an S3 file, or a captured note/link (Phase 8).
+ * The webhook turns each into a tappable bubble row (file → ?file= deep link,
+ * link → its source URL, note → the Timeline tab).
+ */
+export type AskCitation =
+  | { kind: "file"; entry: IndexEntry }
+  | { kind: "capture"; id: string; itemType: "note" | "link"; title: string; sourceUrl: string | null };
+
 export interface AskResult {
   answer: string;
-  citations: IndexEntry[];
+  citations: AskCitation[];
 }
 
 const DEFAULT_MODEL = "anthropic/claude-haiku-4-5";
@@ -53,17 +64,19 @@ const FILTER_CATEGORY: Record<Exclude<FilterMode, "all">, string> = {
 };
 
 const SYSTEM_PROMPT = [
-  "You are DearFile (น้องกวาง), a friendly assistant that helps a user find their own saved files.",
+  "You are DearFile (น้องกวาง), a friendly assistant that helps a user find things in their own second brain:",
+  "their saved FILES (photos, docs, PDFs) and their saved NOTES & LINKS (incl. summarized YouTube/articles).",
   "",
   "RULES:",
-  "- ALWAYS call `search_files` first for EVERY request — even a single word or a vague one. NEVER ask the user for clarification before searching.",
+  "- ALWAYS call `search` first for EVERY request — even a single word or a vague one. NEVER ask the user for clarification before searching.",
+  "- `search` returns both matching files AND notes/links; use whichever answers the question (e.g. \"that clip about X\" is usually a saved link).",
   "- Search with the key nouns/keywords from the question (in the user's language). If the first search finds nothing, try again with different or simpler keywords before concluding nothing exists.",
   "- Use `get_file_detail` only if you need a file's full metadata after searching.",
-  "- Answer ONLY from the files the tools return. Never invent files, filenames, dates, or details.",
+  "- Answer ONLY from what the tools return. Never invent files, notes, links, dates, or details.",
   "- Reply in the SAME language as the user's question (Thai or English). Keep it short and chat-sized.",
-  "- When you found matching files, briefly say what you found (e.g. which file, when). The app shows tappable file links separately, so you don't need to print URLs or keys.",
-  "- If searches genuinely return nothing, say so plainly and suggest the user send that file to DearFile to save it.",
-  "- Do not answer general/off-topic questions; you only help with the user's files.",
+  "- When you found something, briefly say what it is. The app shows tappable links separately, so you don't need to print URLs or keys.",
+  "- If searches genuinely return nothing, say so plainly and suggest the user send that file/note/link to DearFile to save it.",
+  "- Do not answer general/off-topic questions; you only help with the user's own saved content.",
 ].join("\n");
 
 /**
@@ -159,44 +172,90 @@ async function loadAll(scope: AskScope): Promise<IndexEntry[]> {
 }
 
 /**
+ * Semantic search over the user's captured notes/links (Phase 8). Embeds the
+ * query (Voyage) and cosine-searches the pgvector chunks. Best-effort: returns
+ * [] when embeddings aren't configured or on any error, so Ask still answers
+ * over files. Captures are personal, so this is user-scope only.
+ */
+async function searchCaptures(userId: string, query: string, limit: number): Promise<CaptureSearchHit[]> {
+  if (!embeddingsEnabled()) return [];
+  try {
+    const vec = await embedOne(query, "query");
+    return await searchChunks(userId, vec, limit);
+  } catch (err) {
+    console.warn("[ask] capture search skipped:", err);
+    return [];
+  }
+}
+
+/** Did the model actually name this source in its answer? (ranks citations) */
+function isMentioned(c: AskCitation, answerLower: string): boolean {
+  if (c.kind === "file") {
+    return (!!c.entry.filename && answerLower.includes(c.entry.filename.toLowerCase()))
+        || (!!c.entry.subject && answerLower.includes(c.entry.subject.toLowerCase()));
+  }
+  return !!c.title && answerLower.includes(c.title.toLowerCase());
+}
+
+/**
  * Run the agentic retrieval loop and return the answer plus up to 3 citations.
  * Throws on a generation/Gateway error — the caller decides the fallback.
  */
 export async function askDearFile(scope: AskScope, question: string): Promise<AskResult> {
-  // key → { entry, score }. Tools fill this as they surface files; we rank it
-  // into the final citation list after generation. Keeping the max score lets
-  // a stronger search hit win over an incidental get_file_detail lookup.
-  const citationMap = new Map<string, { entry: IndexEntry; score: number }>();
+  // key → { citation, score }. Tools fill this as they surface files/captures;
+  // we rank it into the final citation list after generation. Keeping the max
+  // score lets a stronger hit win over an incidental get_file_detail lookup.
+  const citationMap = new Map<string, { citation: AskCitation; score: number }>();
 
-  function record(entry: IndexEntry, score: number) {
+  function recordFile(entry: IndexEntry, score: number) {
     const prev = citationMap.get(entry.key);
-    if (!prev || score > prev.score) citationMap.set(entry.key, { entry, score });
+    if (!prev || score > prev.score) {
+      citationMap.set(entry.key, { citation: { kind: "file", entry }, score });
+    }
   }
 
-  const search_files = tool({
+  function recordCapture(hit: CaptureSearchHit, score: number) {
+    const key = `cap:${hit.id}`;
+    const prev = citationMap.get(key);
+    if (!prev || score > prev.score) {
+      const title = hit.title?.trim() || (hit.type === "link" ? hit.sourceUrl ?? "Link" : "Note");
+      citationMap.set(key, {
+        citation: { kind: "capture", id: hit.id, itemType: hit.type, title, sourceUrl: hit.sourceUrl },
+        score,
+      });
+    }
+  }
+
+  const search = tool({
     description:
-      "Search the user's saved files by Thai/English keywords. Returns the most relevant files with filename, subject, detail and date.",
+      "Search the user's saved FILES (by keyword) and their NOTES & LINKS (by meaning). Returns the most relevant items to answer the question.",
     inputSchema: z.object({
-      query: z.string().describe("Keywords to search for, in the user's language."),
+      query: z.string().describe("Keywords or a short phrase, in the user's language."),
       filter: z
         .enum(FILTERS)
         .optional()
-        .describe("Restrict to a category. Default 'all'."),
+        .describe("Restrict FILES to a category. Default 'all'."),
       limit: z
         .number()
         .int()
         .min(1)
         .max(SEARCH_LIMIT_MAX)
         .optional()
-        .describe(`Max results (default ${SEARCH_LIMIT_DEFAULT}).`),
+        .describe(`Max results per source (default ${SEARCH_LIMIT_DEFAULT}).`),
     }),
     execute: async ({ query, filter, limit }) => {
-      const results = await runSearch(scope, query, (filter ?? "all") as FilterMode);
-      const top = results.slice(0, limit ?? SEARCH_LIMIT_DEFAULT);
-      for (const r of top) record(r, r.score);
+      const n = limit ?? SEARCH_LIMIT_DEFAULT;
+      const [fileResults, noteResults] = await Promise.all([
+        runSearch(scope, query, (filter ?? "all") as FilterMode),
+        scope.kind === "user"
+          ? searchCaptures(scope.userId, query, n)
+          : Promise.resolve([] as CaptureSearchHit[]),
+      ]);
+      const files = fileResults.slice(0, n);
+      for (const r of files) recordFile(r, r.score);
+      for (const h of noteResults) recordCapture(h, h.score);
       return {
-        count: top.length,
-        files: top.map((e) => ({
+        files: files.map((e) => ({
           key:      e.key,
           filename: e.filename,
           subject:  e.subject,
@@ -204,21 +263,27 @@ export async function askDearFile(scope: AskScope, question: string): Promise<As
           date:     e.date,
           folder:   folderName(e),
         })),
+        notes: noteResults.map((h) => ({
+          type:    h.type,
+          title:   h.title,
+          summary: truncate(h.summary ?? "", DETAIL_TRUNCATE),
+          url:     h.sourceUrl,
+        })),
       };
     },
   });
 
   const get_file_detail = tool({
     description:
-      "Get the full saved metadata for one file by its key (from search_files results).",
+      "Get the full saved metadata for one file by its key (from a search result).",
     inputSchema: z.object({
-      key: z.string().describe("The file key returned by search_files."),
+      key: z.string().describe("The file key returned by search."),
     }),
     execute: async ({ key }) => {
       const all = await loadAll(scope);
       const entry = all.find((e) => e.key === key);
       if (!entry) return { found: false as const };
-      record(entry, citationMap.get(key)?.score ?? 0);
+      recordFile(entry, citationMap.get(key)?.score ?? 0);
       return {
         found:    true as const,
         filename: entry.filename,
@@ -235,36 +300,32 @@ export async function askDearFile(scope: AskScope, question: string): Promise<As
     model:           resolveModel(process.env.ASK_MODEL_ID ?? DEFAULT_MODEL),
     system:          SYSTEM_PROMPT,
     prompt:          question,
-    tools:           { search_files, get_file_detail },
+    tools:           { search, get_file_detail },
     stopWhen:        stepCountIs(4),
     maxOutputTokens: 700,
     // Haiku is reluctant to call tools for terse/vague inputs and will chat
     // instead. Force a search on the first step so EVERY question is grounded
-    // in the file index; later steps go back to auto (answer or refine).
+    // in the user's content; later steps go back to auto (answer or refine).
     prepareStep: async ({ stepNumber }) =>
       stepNumber === 0
-        ? { toolChoice: { type: "tool", toolName: "search_files" }, activeTools: ["search_files"] }
+        ? { toolChoice: { type: "tool", toolName: "search" }, activeTools: ["search"] }
         : {},
   });
 
   const answer = result.text.trim();
 
-  // Rank citations: files whose filename/subject the model actually mentioned
-  // come first, then by search score. Cap at MAX_CITATIONS.
+  // Rank citations: sources the model actually named come first, then by score.
+  // Cap at MAX_CITATIONS (mixed files + captures).
   const answerLower = answer.toLowerCase();
-  const mentioned = (e: IndexEntry) =>
-    (e.filename && answerLower.includes(e.filename.toLowerCase())) ||
-    (e.subject && answerLower.includes(e.subject.toLowerCase()));
-
   const citations = [...citationMap.values()]
     .sort((a, b) => {
-      const am = mentioned(a.entry) ? 1 : 0;
-      const bm = mentioned(b.entry) ? 1 : 0;
+      const am = isMentioned(a.citation, answerLower) ? 1 : 0;
+      const bm = isMentioned(b.citation, answerLower) ? 1 : 0;
       if (am !== bm) return bm - am;
       return b.score - a.score;
     })
     .slice(0, MAX_CITATIONS)
-    .map((c) => c.entry);
+    .map((c) => c.citation);
 
   return {
     answer:
