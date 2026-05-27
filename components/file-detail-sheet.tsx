@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { FolderPickerSheet } from "@/components/folder-picker-sheet";
 import { ShareSheet } from "@/components/share-sheet";
+import { ThumbnailImage } from "@/components/thumbnail-image";
 import { formatBytes, formatDate, getFileIcon } from "@/lib/utils";
 import type { FileItem } from "@/types/file";
 import type { FolderItem } from "@/types/folder";
@@ -153,7 +154,7 @@ export function FileDetailSheet({
         <div className="flex items-center gap-4 mb-6">
           <div className={`flex-shrink-0 h-14 w-14 rounded-2xl overflow-hidden ${type !== "image" ? cfg.bg + " flex items-center justify-center" : ""}`}>
             {type === "image" ? (
-              <img src={file.url} alt={file.name} className="h-14 w-14 object-cover" />
+              <ThumbnailImage src={file.url} alt={file.name} className="h-14 w-14" fallbackSize={22} />
             ) : (
               <Icon size={26} className={cfg.color} />
             )}

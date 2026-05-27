@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { FileDetailSheet } from "@/components/file-detail-sheet";
 import { ImageLightbox } from "@/components/image-lightbox";
+import { ThumbnailImage } from "@/components/thumbnail-image";
 import { useLanguage } from "@/providers/language-provider";
 import { useWorkspace, withWorkspace } from "@/providers/workspace-provider";
 import { formatBytes, getFileIcon } from "@/lib/utils";
@@ -656,10 +657,11 @@ function SearchResultRow({
       style={{ animationDelay: `${index * 35}ms` }}
     >
       {isImage ? (
-        <img
+        <ThumbnailImage
           src={file.url}
           alt={file.name}
-          className="h-10 w-10 rounded-xl object-cover flex-shrink-0"
+          className="h-10 w-10 flex-shrink-0 rounded-xl"
+          fallbackSize={16}
         />
       ) : (
         <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl ${cfg.bg}`}>

@@ -10,6 +10,7 @@ import {
 import { useFiles } from "@/hooks/use-files";
 import { FileDetailSheet } from "@/components/file-detail-sheet";
 import { ImageLightbox } from "@/components/image-lightbox";
+import { ThumbnailImage } from "@/components/thumbnail-image";
 import { FolderPickerSheet } from "@/components/folder-picker-sheet";
 import { ShareSheet } from "@/components/share-sheet";
 import { formatBytes, getFileIcon } from "@/lib/utils";
@@ -383,10 +384,11 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
                   ) : null}
 
                   {isImage ? (
-                    <img
+                    <ThumbnailImage
                       src={file.url}
                       alt={file.name}
-                      className="h-10 w-10 flex-shrink-0 rounded-xl object-cover"
+                      className="h-10 w-10 flex-shrink-0 rounded-xl"
+                      fallbackSize={16}
                     />
                   ) : (
                     <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl ${cfg.bg}`}>
@@ -434,10 +436,11 @@ export function FolderViewer({ folder, folders, onBack, onFolderRefresh }: Folde
                 >
                   {/* Thumbnail */}
                   {isImage ? (
-                    <img
+                    <ThumbnailImage
                       src={file.url}
                       alt={file.name}
-                      className="absolute inset-0 h-full w-full object-cover"
+                      className="absolute inset-0 h-full w-full"
+                      fallbackSize={48}
                     />
                   ) : (
                     <div className={`absolute inset-0 flex items-center justify-center ${cfg.bg}`}>
