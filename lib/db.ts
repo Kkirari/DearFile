@@ -526,3 +526,72 @@ export async function deleteUserApiKey(userId: string, provider: ByokProvider): 
     [userId],
   );
 }
+
+// ── user_mcp_tokens (Phase 11 — bearer tokens for the MCP endpoint) ─────────
+
+export interface McpTokenRow {
+  tokenHash:  string;
+  label:      string | null;
+  createdAt:  string;
+  lastUsedAt: string | null;
+}
+
+interface McpTokenDbRow {
+  token_hash:    string;
+  user_id?:      string;
+  label:         string | null;
+  created_at:    string | Date;
+  last_used_at:  string | Date | null;
+}
+
+/** Insert a new token hash. Caller has already validated + hashed the plaintext. */
+export async function insertMcpToken(input: {
+  userId: string;
+  tokenHash: string;
+  label: string | null;
+}): Promise<void> {
+  await q(
+    `INSERT INTO user_mcp_tokens (token_hash, user_id, label) VALUES ($1, $2, $3)`,
+    [input.tokenHash, input.userId, input.label],
+  );
+}
+
+/**
+ * Resolve a token hash → userId (or null), and bump `last_used_at`.
+ * The update is fire-and-forget intentionally: a failed touch must not 401 the
+ * caller.
+ */
+export async function findUserByMcpTokenHash(tokenHash: string): Promise<string | null> {
+  const rows = await q<{ user_id: string }>(
+    `SELECT user_id FROM user_mcp_tokens WHERE token_hash = $1`,
+    [tokenHash],
+  );
+  const userId = rows[0]?.user_id ?? null;
+  if (userId) {
+    q(`UPDATE user_mcp_tokens SET last_used_at = now() WHERE token_hash = $1`, [tokenHash])
+      .catch((err) => console.warn("[db] mcp token touch failed:", err));
+  }
+  return userId;
+}
+
+export async function listMcpTokens(userId: string): Promise<McpTokenRow[]> {
+  const rows = await q<McpTokenDbRow>(
+    `SELECT token_hash, label, created_at, last_used_at
+     FROM user_mcp_tokens WHERE user_id = $1
+     ORDER BY created_at DESC LIMIT 50`,
+    [userId],
+  );
+  return rows.map((r) => ({
+    tokenHash:  r.token_hash,
+    label:      r.label,
+    createdAt:  toIso(r.created_at)!,
+    lastUsedAt: r.last_used_at ? toIso(r.last_used_at) : null,
+  }));
+}
+
+export async function deleteMcpToken(userId: string, tokenHash: string): Promise<void> {
+  await q(
+    `DELETE FROM user_mcp_tokens WHERE user_id = $1 AND token_hash = $2`,
+    [userId, tokenHash],
+  );
+}
