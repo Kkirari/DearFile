@@ -14,7 +14,7 @@
  */
 
 import { generateText, tool, stepCountIs, type LanguageModel } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { anthropic, createAnthropic } from "@ai-sdk/anthropic";
 import { z } from "zod";
 import {
   searchScored,
@@ -28,6 +28,7 @@ import {
 import { getAiFolder } from "./ai-folders";
 import { searchChunks, getUserProfile, type CaptureSearchHit, type FileEmbeddingHit } from "./db";
 import { embedOne, embeddingsEnabled } from "./embeddings";
+import { getUserKeys, type UserKeys } from "./byok";
 import { searchFiles } from "./file-search";
 
 export type AskScope =
@@ -81,15 +82,20 @@ const SYSTEM_PROMPT = [
 ].join("\n");
 
 /**
- * Resolve a model id into a model the AI SDK can run. By default the
- * `anthropic/claude-*` string routes through the Vercel AI Gateway (the
- * confirmed architecture). Setting `ASK_DIRECT_ANTHROPIC=1` bypasses the Gateway
- * and calls Anthropic directly via ANTHROPIC_API_KEY — a billing-free escape
- * hatch for local testing before a Gateway card is on file. To go back to the
- * Gateway, just unset that env var (no code change). Shared by the Ask engine
- * and the intent classifier.
+ * Resolve a model id into a model the AI SDK can run.
+ *
+ * Priority: per-user BYOK Anthropic key (direct provider) > ASK_DIRECT_ANTHROPIC
+ * env escape hatch (direct provider via ANTHROPIC_API_KEY) > Gateway (plain
+ * model string, AI_GATEWAY_API_KEY / Vercel OIDC). Shared by Ask, capture,
+ * summary, intent, profile.
  */
-export function resolveModel(modelId: string): LanguageModel {
+export function resolveModel(
+  modelId: string,
+  opts?: { anthropicApiKey?: string },
+): LanguageModel {
+  if (opts?.anthropicApiKey) {
+    return createAnthropic({ apiKey: opts.anthropicApiKey })(modelId.replace(/^anthropic\//, ""));
+  }
   if (process.env.ASK_DIRECT_ANTHROPIC === "1") {
     return anthropic(modelId.replace(/^anthropic\//, ""));
   }
@@ -178,10 +184,15 @@ async function loadAll(scope: AskScope): Promise<IndexEntry[]> {
  * [] when embeddings aren't configured or on any error, so Ask still answers
  * over files. Captures are personal, so this is user-scope only.
  */
-async function searchCaptures(userId: string, query: string, limit: number): Promise<CaptureSearchHit[]> {
-  if (!embeddingsEnabled()) return [];
+async function searchCaptures(
+  userId: string,
+  query: string,
+  limit: number,
+  opts?: { voyageApiKey?: string },
+): Promise<CaptureSearchHit[]> {
+  if (!embeddingsEnabled({ apiKey: opts?.voyageApiKey })) return [];
   try {
-    const vec = await embedOne(query, "query");
+    const vec = await embedOne(query, "query", { apiKey: opts?.voyageApiKey });
     return await searchChunks(userId, vec, limit);
   } catch (err) {
     console.warn("[ask] capture search skipped:", err);
@@ -203,6 +214,10 @@ function isMentioned(c: AskCitation, answerLower: string): boolean {
  * Throws on a generation/Gateway error — the caller decides the fallback.
  */
 export async function askDearFile(scope: AskScope, question: string): Promise<AskResult> {
+  // BYOK: user-scope uses the asker's own keys; workspace stays on hosted keys
+  // (workspace BYOK is deferred). Best-effort: missing key just falls through.
+  const userKeys: UserKeys = scope.kind === "user" ? await getUserKeys(scope.userId) : {};
+
   // key → { citation, score }. Tools fill this as they surface files/captures;
   // we rank it into the final citation list after generation. Keeping the max
   // score lets a stronger hit win over an incidental get_file_detail lookup.
@@ -249,8 +264,12 @@ export async function askDearFile(scope: AskScope, question: string): Promise<As
       const fm = (filter ?? "all") as FilterMode;
       const [keywordFiles, semFiles, noteResults] = await Promise.all([
         runSearch(scope, query, fm),
-        scope.kind === "user" ? searchFiles(scope.userId, query, n) : Promise.resolve([] as FileEmbeddingHit[]),
-        scope.kind === "user" ? searchCaptures(scope.userId, query, n) : Promise.resolve([] as CaptureSearchHit[]),
+        scope.kind === "user"
+          ? searchFiles(scope.userId, query, n, { voyageApiKey: userKeys.voyage })
+          : Promise.resolve([] as FileEmbeddingHit[]),
+        scope.kind === "user"
+          ? searchCaptures(scope.userId, query, n, { voyageApiKey: userKeys.voyage })
+          : Promise.resolve([] as CaptureSearchHit[]),
       ]);
 
       // Merge keyword + semantic file hits by key (keep the higher score).
@@ -331,7 +350,7 @@ export async function askDearFile(scope: AskScope, question: string): Promise<As
   }
 
   const result = await generateText({
-    model:           resolveModel(process.env.ASK_MODEL_ID ?? DEFAULT_MODEL),
+    model:           resolveModel(process.env.ASK_MODEL_ID ?? DEFAULT_MODEL, { anthropicApiKey: userKeys.anthropic }),
     system,
     prompt:          question,
     tools:           { search, get_file_detail },

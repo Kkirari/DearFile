@@ -67,7 +67,7 @@ export async function POST(req: Request) {
     }
 
     // 1. Analyze
-    const analysis = await analyzeFile(key);
+    const analysis = await analyzeFile(key, userId);
 
     // 2. Resolve AI folder + final S3 key (rename only when we have real signal)
     const aiFolderId = mapToAiFolder(analysis.category, analysis.type);

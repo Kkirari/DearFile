@@ -17,6 +17,7 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 import { resolveModel } from "./ask";
+import { getUserKeys } from "./byok";
 import {
   insertPendingItem,
   claimForProcessing,
@@ -139,10 +140,14 @@ function systemFor(style: Style): string {
   return base.join("\n");
 }
 
-async function analyze(content: string, style: Style): Promise<Analysis> {
+async function analyze(
+  content: string,
+  style: Style,
+  opts?: { anthropicApiKey?: string },
+): Promise<Analysis> {
   try {
     const { object } = await generateObject({
-      model:           resolveModel(process.env.CAPTURE_MODEL_ID ?? DEFAULT_MODEL),
+      model:           resolveModel(process.env.CAPTURE_MODEL_ID ?? DEFAULT_MODEL, { anthropicApiKey: opts?.anthropicApiKey }),
       system:          systemFor(style),
       prompt:          content.slice(0, MAX_ANALYZE_CHARS),
       schema:          AnalysisSchema,
@@ -217,7 +222,8 @@ export async function processCapture(id: string): Promise<ContentItem | null> {
       style = "note";
     }
 
-    const analysis = await analyze(baseText, style);
+    const userKeys = await getUserKeys(claimed.userId);
+    const analysis = await analyze(baseText, style, { anthropicApiKey: userKeys.anthropic });
     const summary = note ? `${note}\n\n${analysis.summary}` : analysis.summary;
     const title = deriveTitle(claimed, fetchedTitle);
 
@@ -232,8 +238,8 @@ export async function processCapture(id: string): Promise<ContentItem | null> {
     // Embedding is best-effort — a capture stays usable even before Voyage is set
     // up or if it errors; a later reprocess can backfill the chunk.
     try {
-      if (embeddingsEnabled()) {
-        const vec = await embedOne([title, summary].filter(Boolean).join("\n"));
+      if (embeddingsEnabled({ apiKey: userKeys.voyage })) {
+        const vec = await embedOne([title, summary].filter(Boolean).join("\n"), "document", { apiKey: userKeys.voyage });
         await insertChunk({ contentItemId: id, content: summary, embedding: vec });
       }
     } catch (embedErr) {

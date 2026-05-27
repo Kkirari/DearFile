@@ -13,6 +13,7 @@ import { GetObjectCommand } from "@aws-sdk/client-s3";
 import type { Readable } from "stream";
 import { s3, BUCKET } from "./s3";
 import { invokeHaiku, type ContentBlock } from "./anthropic";
+import { getUserKeys } from "./byok";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -137,7 +138,8 @@ async function downloadFromS3(key: string): Promise<Buffer> {
 async function callClaude(
   content: string | ContentBlock[],
   ext: string,
-  knownDate: string | null
+  knownDate: string | null,
+  opts?: { anthropicApiKey?: string },
 ): Promise<FileAnalysis> {
   const userText =
     typeof content === "string"
@@ -162,7 +164,7 @@ async function callClaude(
 
   let raw: string;
   try {
-    raw = await invokeHaiku(messages, SYSTEM_PROMPT);
+    raw = await invokeHaiku(messages, SYSTEM_PROMPT, { apiKey: opts?.anthropicApiKey });
   } catch (err) {
     // API error (size limit, quota, etc.) → graceful fallback
     const msg = err instanceof Error ? err.message : String(err);
@@ -201,7 +203,7 @@ async function callClaude(
 
 // ── Image (jpg/png) ───────────────────────────────────────────────────────────
 
-async function analyzeImage(buffer: Buffer, ext: string): Promise<FileAnalysis> {
+async function analyzeImage(buffer: Buffer, ext: string, opts?: { anthropicApiKey?: string }): Promise<FileAnalysis> {
   // Dynamic import — exifr is ESM
   const { default: exifr } = await import("exifr");
 
@@ -270,12 +272,12 @@ async function analyzeImage(buffer: Buffer, ext: string): Promise<FileAnalysis> 
     },
   ];
 
-  return callClaude(content, ext, exifDate);
+  return callClaude(content, ext, exifDate, opts);
 }
 
 // ── PDF ───────────────────────────────────────────────────────────────────────
 
-async function analyzePdf(buffer: Buffer): Promise<FileAnalysis> {
+async function analyzePdf(buffer: Buffer, opts?: { anthropicApiKey?: string }): Promise<FileAnalysis> {
   // pdf-parse v1 CJS — in serverExternalPackages so bundler skips it (no test-file issue)
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pdfParse = require("pdf-parse") as (
@@ -325,12 +327,12 @@ async function analyzePdf(buffer: Buffer): Promise<FileAnalysis> {
 
   // Use extracted text as fallback
   const text = (data.text ?? "").slice(0, MAX_TEXT_CHARS_FOR_AI);
-  return callClaude(text || "No readable text found", "pdf", date);
+  return callClaude(text || "No readable text found", "pdf", date, opts);
 }
 
 // ── DOCX ──────────────────────────────────────────────────────────────────────
 
-async function analyzeDocx(buffer: Buffer): Promise<FileAnalysis> {
+async function analyzeDocx(buffer: Buffer, opts?: { anthropicApiKey?: string }): Promise<FileAnalysis> {
   const { default: JSZip } = await import("jszip");
 
   const zip = await JSZip.loadAsync(buffer);
@@ -369,12 +371,12 @@ async function analyzeDocx(buffer: Buffer): Promise<FileAnalysis> {
   // Extract document text for Claude
   const docXml = (await zip.file("word/document.xml")?.async("string")) ?? "";
   const text = stripXmlTags(docXml).slice(0, MAX_TEXT_CHARS_FOR_AI);
-  return callClaude(text || "No readable text found", "docx", date);
+  return callClaude(text || "No readable text found", "docx", date, opts);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
-export async function analyzeFile(s3Key: string): Promise<FileAnalysis> {
+export async function analyzeFile(s3Key: string, userId?: string): Promise<FileAnalysis> {
   const ext = s3Key.split(".").pop()?.toLowerCase() ?? "";
 
   if (!(SUPPORTED_EXTENSIONS as readonly string[]).includes(ext)) {
@@ -382,10 +384,13 @@ export async function analyzeFile(s3Key: string): Promise<FileAnalysis> {
   }
 
   const buffer = await downloadFromS3(s3Key);
+  const opts = userId
+    ? { anthropicApiKey: (await getUserKeys(userId)).anthropic }
+    : undefined;
 
-  if (ext === "jpg" || ext === "jpeg" || ext === "png") return analyzeImage(buffer, ext);
-  if (ext === "pdf") return analyzePdf(buffer);
-  if (ext === "docx") return analyzeDocx(buffer);
+  if (ext === "jpg" || ext === "jpeg" || ext === "png") return analyzeImage(buffer, ext, opts);
+  if (ext === "pdf") return analyzePdf(buffer, opts);
+  if (ext === "docx") return analyzeDocx(buffer, opts);
 
   throw new Error(`Unhandled extension: .${ext}`);
 }

@@ -26,6 +26,22 @@ export const t = {
     aboutYouEmpty:    "Save more and DearFile will learn what you're into.",
     clearMemory:      "Clear",
 
+    // BYOK (bring your own AI keys)
+    byokTitle:         "API Keys",
+    byokAnthropic:     "Anthropic (Claude)",
+    byokVoyage:        "Voyage (embeddings)",
+    byokSet:           "Set",
+    byokNotSet:        "Not set",
+    byokAddKey:        "Add key",
+    byokUpdateKey:     "Update",
+    byokRemove:        "Remove",
+    byokConfirmRemove: "Tap again to confirm",
+    byokSave:          "Save",
+    byokSaving:        "Saving…",
+    byokCancel:        "Cancel",
+    byokSaveFailed:    "Couldn't save key",
+    byokHelp:          "Use your own keys — stored encrypted; used instead of the hosted ones.",
+
     // Header
     greeting: "Hello",
     tagline:  "Your file storage",
@@ -184,6 +200,22 @@ export const t = {
     aboutYouInterests:"ความสนใจ",
     aboutYouEmpty:    "บันทึกเพิ่มอีกหน่อย แล้ว DearFile จะเรียนรู้ความสนใจของคุณ",
     clearMemory:      "ล้าง",
+
+    // BYOK (bring your own AI keys)
+    byokTitle:         "API Keys ของคุณ",
+    byokAnthropic:     "Anthropic (Claude)",
+    byokVoyage:        "Voyage (embeddings)",
+    byokSet:           "ตั้งแล้ว",
+    byokNotSet:        "ยังไม่ตั้ง",
+    byokAddKey:        "เพิ่ม key",
+    byokUpdateKey:     "อัปเดต",
+    byokRemove:        "ลบ",
+    byokConfirmRemove: "แตะอีกครั้งเพื่อยืนยัน",
+    byokSave:          "บันทึก",
+    byokSaving:        "กำลังบันทึก…",
+    byokCancel:        "ยกเลิก",
+    byokSaveFailed:    "บันทึกไม่ได้",
+    byokHelp:          "ใช้ API key ของคุณเอง — เก็บแบบเข้ารหัส ใช้แทน key ของระบบทันที",
 
     // Header
     greeting: "สวัสดี",

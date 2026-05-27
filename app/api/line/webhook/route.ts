@@ -294,7 +294,7 @@ async function handlePersonalFileMessage(
 
   if (ANALYZER_EXTENSIONS.has(ext)) {
     try {
-      const analysis = await analyzeFile(initialKey);
+      const analysis = await analyzeFile(initialKey, userId);
       aiFolderId = mapToAiFolder(analysis.category, analysis.type);
 
       if (analysis.via !== "fallback") {
@@ -385,7 +385,7 @@ async function handleWorkspaceFileMessage(
 
   if (ANALYZER_EXTENSIONS.has(ext)) {
     try {
-      const analysis = await analyzeFile(initialKey);
+      const analysis = await analyzeFile(initialKey, uploaderId);
       aiFolderId = mapToAiFolder(analysis.category, analysis.type);
 
       if (analysis.via !== "fallback") {
@@ -813,7 +813,7 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
     // router. Otherwise let the Hybrid Intent Router decide so greetings /
     // help / noise don't pay for the Ask pipeline, and plain "notes to self"
     // are auto-saved to the Timeline (ask-biased — questions are never saved).
-    const intent = hadPrefix ? "ask" : (await routeIntent(question)).intent;
+    const intent = hadPrefix ? "ask" : (await routeIntent(question, userId)).intent;
     switch (intent) {
       case "note": {
         // Smart auto-save: the router judged this a note → capture it like /note.
