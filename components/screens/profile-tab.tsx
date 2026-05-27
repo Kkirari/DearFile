@@ -22,6 +22,7 @@ import {
 import { formatBytes, getFileIcon } from "@/lib/utils";
 import { useProfile } from "@/hooks/use-profile";
 import { ByokKeysCard } from "@/components/byok-keys-card";
+import { McpTokensCard } from "@/components/mcp-tokens-card";
 import { useLanguage } from "@/providers/language-provider";
 import { useTheme } from "@/providers/theme-provider";
 import { useLiff } from "@/providers/liff-provider";
@@ -260,6 +261,9 @@ export function ProfileTab({ displayName, pictureUrl, files, folders }: ProfileT
 
       {/* ── BYOK API KEYS (hidden when BYOK_ENCRYPTION_KEY is unset) ── */}
       <ByokKeysCard />
+
+      {/* ── MCP ACCESS (bearer tokens for external AI clients) ── */}
+      <McpTokensCard />
 
       {/* ── SETTINGS ── */}
       <section className="px-5 mt-5">

@@ -42,6 +42,21 @@ export const t = {
     byokSaveFailed:    "Couldn't save key",
     byokHelp:          "Use your own keys — stored encrypted; used instead of the hosted ones.",
 
+    // MCP (bearer tokens for Claude Desktop & other AI clients)
+    mcpTitle:          "MCP Access",
+    mcpEmpty:          "No tokens yet — generate one to let Claude Desktop search your files & notes.",
+    mcpGenerate:       "Generate token",
+    mcpMinting:        "Generating…",
+    mcpLabelPlaceholder:"Label (e.g. Claude Desktop)",
+    mcpOneTimeReveal:  "Copy this token now — you won't see it again.",
+    mcpConfigSnippet:  "Paste into your MCP client config:",
+    mcpDone:           "Done",
+    mcpRevoke:         "Revoke",
+    mcpConfirmRevoke:  "Tap again",
+    mcpUnlabeled:      "Unlabeled token",
+    mcpMintFailed:     "Couldn't generate token",
+    mcpHelp:           "Tokens grant read-only access to your files, notes, and daily summary via MCP.",
+
     // Header
     greeting: "Hello",
     tagline:  "Your file storage",
@@ -216,6 +231,21 @@ export const t = {
     byokCancel:        "ยกเลิก",
     byokSaveFailed:    "บันทึกไม่ได้",
     byokHelp:          "ใช้ API key ของคุณเอง — เก็บแบบเข้ารหัส ใช้แทน key ของระบบทันที",
+
+    // MCP (bearer tokens for Claude Desktop & other AI clients)
+    mcpTitle:          "การเชื่อมต่อ MCP",
+    mcpEmpty:          "ยังไม่มี token — สร้างเพื่อให้ Claude Desktop ค้นไฟล์/โน้ตของคุณ",
+    mcpGenerate:       "สร้าง token",
+    mcpMinting:        "กำลังสร้าง…",
+    mcpLabelPlaceholder:"ป้ายชื่อ (เช่น Claude Desktop)",
+    mcpOneTimeReveal:  "คัดลอก token ตอนนี้ — จะไม่เห็นอีก",
+    mcpConfigSnippet:  "วางใน config ของ MCP client:",
+    mcpDone:           "เสร็จแล้ว",
+    mcpRevoke:         "เพิกถอน",
+    mcpConfirmRevoke:  "แตะอีกครั้ง",
+    mcpUnlabeled:      "ไม่มีชื่อ",
+    mcpMintFailed:     "สร้าง token ไม่ได้",
+    mcpHelp:           "Token ให้สิทธิ์อ่านไฟล์ โน้ต และสรุปประจำวันผ่าน MCP เท่านั้น",
 
     // Header
     greeting: "สวัสดี",
