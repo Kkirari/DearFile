@@ -26,6 +26,7 @@ import { generateText } from "ai";
 import { getAllEntries, type IndexEntry } from "./search-index";
 import { getAiFolder } from "./ai-folders";
 import { resolveModel } from "./ask";
+import { getUserKeys } from "./byok";
 import { listReadyItemsBetween, getUserProfile, type ContentItem, type UserProfile } from "./db";
 
 const DEFAULT_MODEL = "anthropic/claude-haiku-4-5";
@@ -113,6 +114,7 @@ async function synthesize(
   items: ContentItem[],
   date: string,
   profile?: UserProfile | null,
+  opts?: { anthropicApiKey?: string },
 ): Promise<string> {
   const fileLines = files
     .slice(0, MAX_FILES_TO_MODEL)
@@ -141,7 +143,7 @@ async function synthesize(
   if (itemLines.length) sections.push(`Notes & links saved today (${items.length}):\n${itemLines.join("\n")}`);
 
   const { text } = await generateText({
-    model:           resolveModel(process.env.SUMMARY_MODEL_ID ?? DEFAULT_MODEL),
+    model:           resolveModel(process.env.SUMMARY_MODEL_ID ?? DEFAULT_MODEL, { anthropicApiKey: opts?.anthropicApiKey }),
     system:          SYSTEM_PROMPT,
     prompt:          sections.join("\n\n"),
     maxOutputTokens: 800,
@@ -220,9 +222,10 @@ export async function buildSummaryForDate(
     console.warn("[summary] profile unavailable:", err);
   }
 
+  const userKeys = await getUserKeys(userId);
   let text: string;
   try {
-    text = await synthesize(files, items, date, profile);
+    text = await synthesize(files, items, date, profile, { anthropicApiKey: userKeys.anthropic });
     if (!text) text = templateBrief(files, items);
   } catch (err) {
     console.warn("[summary] synthesis failed, using template:", err);

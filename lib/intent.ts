@@ -16,6 +16,7 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 import { resolveModel } from "./ask";
+import { getUserKeys } from "./byok";
 
 export type Intent = "ask" | "greeting" | "help" | "noise" | "note";
 export interface Decision {
@@ -143,10 +144,10 @@ const INTENT_SYSTEM =
   'When unsure, choose "ask" — never classify a real question as a note. Reply with the intent only.';
 
 /** Cheap single-shot classifier. Only call for "unsure" text. ASK-biased. */
-export async function classifyByLLM(text: string): Promise<Intent> {
+export async function classifyByLLM(text: string, opts?: { anthropicApiKey?: string }): Promise<Intent> {
   try {
     const { object } = await generateObject({
-      model:  resolveModel(process.env.INTENT_MODEL_ID ?? DEFAULT_INTENT_MODEL),
+      model:  resolveModel(process.env.INTENT_MODEL_ID ?? DEFAULT_INTENT_MODEL, { anthropicApiKey: opts?.anthropicApiKey }),
       system: INTENT_SYSTEM,
       prompt: text,
       schema: z.object({ intent: z.enum(["ask", "greeting", "help", "note"]) }),
@@ -165,12 +166,13 @@ export async function classifyByLLM(text: string): Promise<Intent> {
  * "unsure" AND only when INTENT_CLASSIFIER=on. With the flag off, "unsure"
  * falls back to "ask" — i.e. today's behavior, zero added cost.
  */
-export async function routeIntent(text: string): Promise<Decision> {
+export async function routeIntent(text: string, userId?: string): Promise<Decision> {
   const ruled = classifyByRules(text);
   if (ruled !== "unsure") return { intent: ruled, via: "rules" };
 
   if (process.env.INTENT_CLASSIFIER === "on") {
-    return { intent: await classifyByLLM(text), via: "llm" };
+    const userKeys = userId ? await getUserKeys(userId) : {};
+    return { intent: await classifyByLLM(text, { anthropicApiKey: userKeys.anthropic }), via: "llm" };
   }
   return { intent: "ask", via: "rules" };
 }

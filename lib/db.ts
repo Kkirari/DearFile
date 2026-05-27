@@ -471,3 +471,58 @@ export async function listEmbeddedFileKeys(userId: string): Promise<Set<string>>
   );
   return new Set(rows.map((r) => r.file_key));
 }
+
+// ── user_api_keys (BYOK encrypted at-rest) ──────────────────────────────────
+
+export type ByokProvider = "anthropic" | "voyage";
+
+export interface UserApiKeyCiphers {
+  anthropicCt: string | null;
+  voyageCt: string | null;
+  updatedAt: string;
+}
+
+interface UserApiKeyRow {
+  anthropic_ct: string | null;
+  voyage_ct: string | null;
+  updated_at: string | Date;
+}
+
+/** Ciphertext blobs for a user (decrypt via lib/crypto). null if no row. */
+export async function getUserApiKeyCiphers(userId: string): Promise<UserApiKeyCiphers | null> {
+  const rows = await q<UserApiKeyRow>(
+    `SELECT anthropic_ct, voyage_ct, updated_at FROM user_api_keys WHERE user_id = $1`,
+    [userId],
+  );
+  const r = rows[0];
+  return r
+    ? { anthropicCt: r.anthropic_ct, voyageCt: r.voyage_ct, updatedAt: toIso(r.updated_at)! }
+    : null;
+}
+
+/** Upsert one provider's ciphertext; leaves the other provider untouched. */
+export async function upsertUserApiKey(
+  userId: string,
+  provider: ByokProvider,
+  ciphertext: string,
+): Promise<void> {
+  const col = provider === "anthropic" ? "anthropic_ct" : "voyage_ct";
+  // First insert (no-op on conflict so we can update on a second statement);
+  // raw SQL via Neon HTTP doesn't allow building column lists from params.
+  await q(
+    `INSERT INTO user_api_keys (user_id, ${col}, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (user_id)
+     DO UPDATE SET ${col} = EXCLUDED.${col}, updated_at = now()`,
+    [userId, ciphertext],
+  );
+}
+
+/** Null one provider's ciphertext; the row stays so the other key survives. */
+export async function deleteUserApiKey(userId: string, provider: ByokProvider): Promise<void> {
+  const col = provider === "anthropic" ? "anthropic_ct" : "voyage_ct";
+  await q(
+    `UPDATE user_api_keys SET ${col} = NULL, updated_at = now() WHERE user_id = $1`,
+    [userId],
+  );
+}

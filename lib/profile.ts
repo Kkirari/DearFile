@@ -16,6 +16,7 @@
 import { generateObject } from "ai";
 import { z } from "zod";
 import { resolveModel } from "./ask";
+import { getUserKeys } from "./byok";
 import { getUserProfile, upsertUserProfile, type ContentItem } from "./db";
 import type { IndexEntry } from "./search-index";
 
@@ -66,8 +67,9 @@ export async function updateUserProfile(
       ...itemLines,
     ].join("\n");
 
+    const userKeys = await getUserKeys(userId);
     const { object } = await generateObject({
-      model:           resolveModel(process.env.PROFILE_MODEL_ID ?? DEFAULT_MODEL),
+      model:           resolveModel(process.env.PROFILE_MODEL_ID ?? DEFAULT_MODEL, { anthropicApiKey: userKeys.anthropic }),
       system:          SYSTEM,
       prompt,
       schema:          ProfileSchema,

@@ -13,20 +13,22 @@ const VOYAGE_URL = "https://api.voyageai.com/v1/embeddings";
 const MODEL = process.env.EMBED_MODEL ?? "voyage-3-large";
 export const EMBED_DIMS = 1024;
 
-export function embeddingsEnabled(): boolean {
-  return !!process.env.VOYAGE_API_KEY;
+export function embeddingsEnabled(opts?: { apiKey?: string }): boolean {
+  return !!(opts?.apiKey || process.env.VOYAGE_API_KEY);
 }
 
 /**
  * Embed one or more texts → array of 1024-d vectors (same order as input).
  * `inputType` lets Voyage optimize: "document" when storing, "query" when searching.
+ * `opts.apiKey` overrides the hosted `VOYAGE_API_KEY` for BYOK callers.
  * Throws on misconfiguration / API error — callers decide whether to degrade.
  */
 export async function embed(
   texts: string[],
   inputType: "document" | "query" = "document",
+  opts?: { apiKey?: string },
 ): Promise<number[][]> {
-  const key = process.env.VOYAGE_API_KEY;
+  const key = opts?.apiKey || process.env.VOYAGE_API_KEY;
   if (!key) throw new Error("VOYAGE_API_KEY is not set");
   if (texts.length === 0) return [];
 
@@ -61,7 +63,8 @@ export async function embed(
 export async function embedOne(
   text: string,
   inputType: "document" | "query" = "document",
+  opts?: { apiKey?: string },
 ): Promise<number[]> {
-  const [v] = await embed([text], inputType);
+  const [v] = await embed([text], inputType, opts);
   return v;
 }

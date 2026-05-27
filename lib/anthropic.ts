@@ -2,10 +2,6 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const MODEL_ID = process.env.ANTHROPIC_MODEL_ID ?? "claude-haiku-4-5";
 
-const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY!,
-});
-
 export type TextBlock = { type: "text"; text: string };
 export type ImageBlock = {
   type: "image";
@@ -24,8 +20,12 @@ export interface HaikuMessage {
 
 export async function invokeHaiku(
   messages: HaikuMessage[],
-  systemPrompt?: string
+  systemPrompt?: string,
+  opts?: { apiKey?: string },
 ): Promise<string> {
+  const apiKey = opts?.apiKey || process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
+  const client = new Anthropic({ apiKey });
   const response = await client.messages.create({
     model: MODEL_ID,
     max_tokens: 1024,

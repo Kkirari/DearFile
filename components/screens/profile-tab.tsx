@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 import { formatBytes, getFileIcon } from "@/lib/utils";
 import { useProfile } from "@/hooks/use-profile";
+import { ByokKeysCard } from "@/components/byok-keys-card";
 import { useLanguage } from "@/providers/language-provider";
 import { useTheme } from "@/providers/theme-provider";
 import { useLiff } from "@/providers/liff-provider";
@@ -256,6 +257,9 @@ export function ProfileTab({ displayName, pictureUrl, files, folders }: ProfileT
           )}
         </div>
       </section>
+
+      {/* ── BYOK API KEYS (hidden when BYOK_ENCRYPTION_KEY is unset) ── */}
+      <ByokKeysCard />
 
       {/* ── SETTINGS ── */}
       <section className="px-5 mt-5">
