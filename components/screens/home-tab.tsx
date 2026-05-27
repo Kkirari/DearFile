@@ -17,6 +17,7 @@ import {
 import { FolderCard } from "@/components/folder-card";
 import { FileDetailSheet } from "@/components/file-detail-sheet";
 import { ImageLightbox } from "@/components/image-lightbox";
+import { ThumbnailImage } from "@/components/thumbnail-image";
 import { FolderViewer } from "@/components/screens/folder-viewer";
 import { WorkspaceSwitcher } from "@/components/workspace-switcher";
 import { useFolderPreviews } from "@/hooks/use-folder-previews";
@@ -255,10 +256,11 @@ export function HomeTab({ displayName, pictureUrl, onNavigate, files, filesLoadi
                     style={{ animationDelay: `${i * 50}ms` }}
                   >
                     {isImage ? (
-                      <img
+                      <ThumbnailImage
                         src={file.url}
                         alt={file.name}
-                        className="h-9 w-9 rounded-xl object-cover"
+                        className="h-9 w-9 rounded-xl"
+                        fallbackSize={14}
                       />
                     ) : (
                       <div className={`flex h-9 w-9 items-center justify-center rounded-xl ${cfg.bg}`}>
