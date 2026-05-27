@@ -56,6 +56,7 @@ import {
 import { askDearFile, type AskScope } from "@/lib/ask";
 import { buildDailySummary } from "@/lib/summary";
 import { ingestLink, ingestNote, processCapture } from "@/lib/capture";
+import { transcribeAudio, transcriptionEnabled, transcriptionMaxBytes } from "@/lib/transcribe";
 import { checkAndIncrementAsk } from "@/lib/rate-limit";
 import { routeIntent } from "@/lib/intent";
 import { invalidatePreviews } from "@/lib/previews-cache";
@@ -598,6 +599,104 @@ function parseCaptureCommand(text: string): CaptureRequest | null {
 }
 
 /**
+ * Voice message handler — transcribe the LINE audio blob (OpenAI), then run
+ * the transcript through the same note-capture pipeline as typed notes.
+ *
+ * Returns an immediate text reply only for synchronous, user-actionable
+ * failures (feature disabled, oversized). Otherwise returns `null` and does
+ * the heavy work in `after()`, surfacing the result via `pushMessage`.
+ */
+async function handleVoiceNote(
+  userId: string,
+  msg: LineMessageContent,
+  replyToken: string | undefined,
+): Promise<LineMessage[] | null> {
+  if (!transcriptionEnabled()) {
+    return [{
+      type: "text",
+      text:
+        "🎙️ ฟังเสียงยังไม่พร้อม ลองพิมพ์ข้อความแทนได้นะ\n" +
+        "Voice transcription isn't set up yet — please type your note instead.",
+    }];
+  }
+
+  let content: { buffer: Buffer; contentType: string };
+  try {
+    content = await fetchLineContent(msg.id);
+  } catch (err) {
+    console.error("[line/webhook] voice fetch failed:", err);
+    return [{
+      type: "text",
+      text:
+        "⚠️ โหลดเสียงไม่ได้ ลองส่งใหม่อีกครั้งนะ\n" +
+        "Couldn't fetch the audio — please try again.",
+    }];
+  }
+
+  if (content.buffer.byteLength > transcriptionMaxBytes()) {
+    return [{
+      type: "text",
+      text:
+        "🎙️ คลิปเสียงยาวเกินไป ลองตัดให้สั้นลงนะ\n" +
+        "Voice clip is too long — please trim it and resend.",
+    }];
+  }
+
+  after(async () => {
+    try {
+      let transcript: string;
+      try {
+        transcript = await transcribeAudio(content.buffer, content.contentType, { languageHint: "th" });
+      } catch (err) {
+        console.error("[line/webhook] transcription failed:", err);
+        await pushMessage(userId, [{
+          type: "text",
+          text:
+            "⚠️ ถอดเสียงไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
+            "Couldn't transcribe right now — please try again.",
+        }]);
+        return;
+      }
+
+      // Whisper-family models can return tiny filler ("…", " ") on near-silent
+      // input. Anything below 2 chars after trim is unusable.
+      if (transcript.replace(/[\s.,!?…]/g, "").length < 2) {
+        await pushMessage(userId, [{
+          type: "text",
+          text:
+            "🎙️ ฟังไม่ออก ลองอัดในที่เงียบกว่านี้นะ\n" +
+            "Couldn't make out the audio — try recording somewhere quieter.",
+        }]);
+        return;
+      }
+
+      let id: string;
+      try {
+        id = await ingestNote(userId, transcript);
+      } catch (err) {
+        console.error("[line/webhook] voice-note ingest failed:", err);
+        await pushMessage(userId, [{
+          type: "text",
+          text:
+            "⚠️ บันทึกไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
+            "Couldn't save the note — please try again.",
+        }]);
+        return;
+      }
+
+      // Hand off to the same delivery path as a typed note. The summary
+      // bubble looks identical; the user doesn't have to know the source
+      // was audio.
+      deliverCaptureInBackground(id, userId, replyToken);
+    } catch (err) {
+      console.error("[line/webhook] voice-note background failed:", err);
+    }
+  });
+
+  return null;
+}
+
+/**
  * Process an already-ingested capture in the background and deliver the summary
  * bubble — reply if still inside the token's single-use window, else push.
  */
@@ -765,7 +864,15 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
   }
 
   // ── DM flow ────────────────────────────────────────────────────────────
-  if (msg.type === "image" || msg.type === "video" || msg.type === "audio" || msg.type === "file") {
+
+  // Voice messages bypass the file pipeline: transcribe → ingest as a note →
+  // surface the standard capture bubble. Returning [] (with backgrounded
+  // delivery) keeps the webhook fast and the UX identical to a typed note.
+  if (msg.type === "audio") {
+    return handleVoiceNote(userId, msg, event.replyToken);
+  }
+
+  if (msg.type === "image" || msg.type === "video" || msg.type === "file") {
     try {
       return await handlePersonalFileMessage(userId, msg);
     } catch (err) {
