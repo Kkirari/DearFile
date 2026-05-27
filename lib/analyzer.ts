@@ -36,30 +36,70 @@ const SUPPORTED_EXTENSIONS = ["jpg", "jpeg", "png", "pdf", "docx"] as const;
 const MAX_IMAGE_BYTES_FOR_AI = Math.floor(3.5 * 1024 * 1024); // ~3.5 MB
 const MAX_TEXT_CHARS_FOR_AI = 4000;
 
-const SYSTEM_PROMPT = `You are a file categorization assistant for a document management app.
-Analyze the file content and return ONLY a JSON object — no extra text, no markdown fences.
+const SYSTEM_PROMPT = `You are the file analyzer for DearFile — a Thai user's personal cloud storage.
+Look at the file's actual content and return a JSON object that names what it IS, specifically.
+Never invent details. Never identify named individuals.
 
-Required fields:
-  category   – one of: photo, document, finance, academic
-  type       – sub-type within the category. Use one of:
+PROCESS (do this in order):
+1. Read any visible text FIRST — signs, receipt totals, brand names, headings, screen content,
+   captions, dates. Specific real text always beats a generic scene description.
+2. Pick the most specific category + type for what the file IS.
+3. Choose a subject that names the concrete thing (merchant, dish, breed, place, document title),
+   not a generic word. If you can't tell anything specific, fall back to the dominant visual
+   noun (e.g. "outdoor-landscape", "white-cat-portrait") — but NEVER write "untitled",
+   "general-photo", "scan", or just the category name.
+
+JSON FIELDS:
+  category   — one of: photo, document, finance, academic
+  type       — sub-type. Allowed values per category:
                 photo:    general | people | animal | food | place | screenshot
                 document: contract | report | general
                 finance:  receipt | invoice | statement
                 academic: exam | worksheet | slide | research | general
-  subject    – 3-5 word descriptive topic in English (kebab-case, e.g. "monthly-sales-report")
-  detail     – one sentence describing the content (English)
-  date       – date found in content as "DD-M-YY" (e.g. "06-5-26"), or null if none
-  keywords   – array of 4-8 search keywords MIXED Thai and English combined
-                (e.g. ["ใบเสร็จ","กาแฟ","starbucks","receipt","coffee"])
-                Include topic words, type, and any specific subjects (school subject, brand, etc.)
-  suggested_filename – [category]_[subject]_[DD-M-YY].[ext] or [category]_[subject].[ext] if no date
+              Cues:
+                screenshot  → visible status bar / battery icon / phone notch / app UI chrome /
+                              browser address bar / OS buttons / pixel-perfect rectangles
+                animal      → identify SPECIES (and breed if visible): "siamese-cat", "shiba-dog",
+                              "parrot-bird". Never the animal's name.
+                food        → name the DISH or drink: "pad-thai", "iced-latte", "khao-soi"
+                place       → indoor/outdoor + landmark or type: "temple-courtyard",
+                              "chiangmai-street", "office-meeting-room"
+                people      → group size + context: "group-portrait", "wedding-ceremony",
+                              "team-photo". NEVER write a person's name.
+                receipt     → finance.receipt — has a merchant + line items + total
+                invoice     → finance.invoice — issued by a business with VAT / invoice no.
+                statement   → finance.statement — bank / credit card account history
+                contract    → document.contract — agreement / MOU / signature block
+                report      → document.report — multi-section analysis
+                exam/worksheet/slide/research → academic — student / school / paper context
+  subject    — 2-5 words, lowercase a-z digits hyphens only. Must be SPECIFIC.
+                Good: "starbucks-receipt", "pad-thai-bowl", "siamese-cat-portrait",
+                       "boarding-pass-bkk-cnx", "monthly-sales-q2", "math-worksheet-fractions"
+                Bad:  "photo", "image", "scan", "untitled-photo", "general-photo",
+                       "outdoor-photograph", "document", "untitled"
+  detail     — ONE sentence (≤ 20 words) describing what is in the file.
+                Language rule (important): use the language of the visible text in the file.
+                  • If Thai text dominates → write detail in Thai.
+                  • If English text dominates → write detail in English.
+                  • If there is NO visible text → write detail in Thai (the user's primary
+                    language).
+                Examples:
+                  • Thai receipt → "ใบเสร็จร้านกาแฟ Starbucks ยอดรวม 175 บาท"
+                  • English book cover → "Cover of 'Atomic Habits' by James Clear"
+                  • Scenic photo (no text) → "วิวทะเลตอนพระอาทิตย์ตกที่ชายหาด"
+  date       — date that is PRINTED / VISIBLE in the file content, formatted "DD-M-YY"
+                (e.g. "06-5-26"). If no visible date in the content, return null.
+                Do NOT guess from file metadata; that's handled separately.
+  keywords   — 4-8 search terms MIXED Thai + English: brand names, dish, type, language-specific
+                terms a user might search by. Example: ["ใบเสร็จ","กาแฟ","starbucks","receipt"].
+  suggested_filename — "[category]_[subject]_[DD-M-YY].[ext]" or "[category]_[subject].[ext]" if
+                no date. Lowercase a-z, digits, hyphens, underscores only.
 
-STRICT RULES:
-- NEVER include person names, pet names, or any identifiable individual names in any field.
-- For animals: identify species (cat, dog, bird) but never the animal's name.
-- subject and suggested_filename: only lowercase a-z, digits, hyphens.
-- keywords: arbitrary Thai/English allowed.
-- Return only the JSON object.`;
+STRICT RULES (any violation = invalid response):
+- NEVER include a person's name, a pet's name, or any identifiable individual's name.
+- subject + suggested_filename: only a-z, 0-9, "-" and "_" (in filename) — no spaces, no Thai.
+- keywords MUST be a JSON array of plain strings.
+- Return ONLY the JSON object. No markdown fences, no commentary, no leading text.`;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -90,6 +130,23 @@ function buildFilename(
   const cat = sanitizeSegment(category) || "document";
   const sub = sanitizeSegment(subject) || "untitled";
   return date ? `${cat}_${sub}_${date}.${ext}` : `${cat}_${sub}.${ext}`;
+}
+
+/**
+ * Many phone cameras stuff useless boilerplate into ImageDescription / UserComment
+ * (e.g. "IMG_0001", "DCIM_4567", "Photo", "Camera Photo", "Scan"). When that's
+ * all we have, we shouldn't use it as a filename or skip Claude — we should
+ * still ask Claude what's actually in the image.
+ */
+const MEANINGLESS_EXIF_PATTERNS: RegExp[] = [
+  /^(img|dsc|dcim|mvimg|pano|scan|photo|camera|image|untitled|capture|snapshot)[\s_\-.]*\d*$/i,
+  /^[\s\d_\-.]+$/,                 // pure digits / separators
+  /^.{0,2}$/,                      // 0-2 chars
+];
+
+function isMeaningfulExifDescription(s: string): boolean {
+  const trimmed = s.trim();
+  return trimmed.length >= 3 && !MEANINGLESS_EXIF_PATTERNS.some((re) => re.test(trimmed));
 }
 
 function guessCategory(text: string): string {
@@ -164,7 +221,10 @@ async function callClaude(
 
   let raw: string;
   try {
-    raw = await invokeHaiku(messages, SYSTEM_PROMPT, { apiKey: opts?.anthropicApiKey });
+    raw = await invokeHaiku(messages, SYSTEM_PROMPT, {
+      apiKey:  opts?.anthropicApiKey,
+      modelId: process.env.ANALYZER_MODEL_ID, // optional — falls back to ANTHROPIC_MODEL_ID then default
+    });
   } catch (err) {
     // API error (size limit, quota, etc.) → graceful fallback
     const msg = err instanceof Error ? err.message : String(err);
@@ -232,13 +292,15 @@ async function analyzeImage(buffer: Buffer, ext: string, opts?: { anthropicApiKe
     // EXIF parse failed — proceed without
   }
 
-  // Sufficient: meaningful description + date both present
-  if (description.length > 3 && exifDate) {
+  // Fast-path: only when EXIF gives us BOTH a meaningful description AND a date.
+  // Junk-description filenames (IMG_0001, DCIM_4567, "Camera Photo") fall through
+  // to Claude so the file actually gets named for its content, not its EXIF noise.
+  if (exifDate && isMeaningfulExifDescription(description)) {
     return {
       category: "photo",
       type: "general",
       subject: description,
-      detail: "Photo with EXIF metadata",
+      detail: description,
       date: exifDate,
       keywords: description.split(/\s+/).filter((w) => w.length > 1).slice(0, 6),
       suggested_filename: buildFilename("photo", description, exifDate, ext),
