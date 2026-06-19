@@ -117,6 +117,41 @@ export async function fetchGroupSummary(
 }
 
 /**
+ * Make the bot leave a LINE group. LINE returns 200 on success; 404 if the
+ * bot isn't in the group anymore (already left / kicked). We treat 404 as a
+ * no-op so the caller can fire-and-forget.
+ */
+export async function leaveGroup(groupId: string): Promise<void> {
+  const res = await fetch(`https://api.line.me/v2/bot/group/${groupId}/leave`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken()}` },
+  });
+  if (res.ok || res.status === 404) return;
+  const body = await res.text();
+  throw new Error(`LINE leave group failed (${res.status}): ${body}`);
+}
+
+/**
+ * Phrases a group member can type to make the bot leave the group with a
+ * witty one-liner reply. Exact match (case-insensitive, leading / ! @ tolerated).
+ * Extend this list to add more kick phrases.
+ */
+export const GROUP_LEAVE_COMMANDS: readonly string[] = [
+  "!น้องกวาง หมดเวลาแล้วเธอคงต้องไป",
+];
+
+/** Reply sent back to the group right before the bot leaves. */
+export const GROUP_LEAVE_REPLY_TEXT = "พริ๊ๆจะทำจริงๆหรอครับ 😢";
+
+export function isGroupLeaveCommand(text: string): boolean {
+  const t = (text ?? "").trim().toLowerCase().replace(/^[/!@]/, "").trim();
+  return GROUP_LEAVE_COMMANDS.some((cmd) => {
+    const normalized = cmd.trim().toLowerCase().replace(/^[/!@]/, "").trim();
+    return t === normalized || t.startsWith(`${normalized} `) || t.startsWith(`${normalized}\n`);
+  });
+}
+
+/**
  * Download the binary content of a user-uploaded image/video/audio/file
  * message from LINE. Buffers the entire response — LINE caps content at
  * ~300MB but we should fail gracefully on anything close to function memory.
@@ -172,7 +207,7 @@ const TEXT_DARK_WARM  = "#4a4036";
 const TEXT_TAUPE      = "#b0a396";
 const BORDER_BEIGE    = "#e0d8cc";
 
-function imageBubble(imageUrl: string, label: string, linkUrl: string) {
+function imageBubble(imageUrl: string, action: ImageBubbleAction) {
   return {
     type: "bubble",
     body: {
@@ -186,26 +221,91 @@ function imageBubble(imageUrl: string, label: string, linkUrl: string) {
           size: "full",
           aspectMode: "cover",
           aspectRatio: "4:4",
-          action: {
-            type: "uri",
-            label,
-            uri: linkUrl,
-          },
+          action,
         },
       ],
     },
   };
 }
 
-export function welcomeBubble(liffUrl: string): LineFlexMessage {
+/**
+ * Action attached to an image bubble. `uri` opens a link; `message` sends a
+ * user-typed text (LINE echoes it into the chat and forwards a message event
+ * to the webhook — useful for triggering commands without typing).
+ */
+export type ImageBubbleAction =
+  | { type: "uri"; label?: string; uri: string }
+  | { type: "message"; label?: string; text: string };
+
+const ADD_FRIEND_OA_URL = "https://line.me/R/ti/p/@297ybspj";
+
+const GROUP_WELCOME_EXAMPLES_TEXT =
+  "พริ๊ๆสามารถสั่งน้องกวางได้มากมายเช่น\n" +
+  "!น้องกวาง หารูปแมวส้ม\n" +
+  "!น้องกวาง สร้างโฟลเดอร์ชื่อการบ้านครั้งที่1";
+
+const GROUP_WELCOME_KICK_TEXT =
+  'พริ๊ๆสามารถไล่น้องกวางโดยพิมพ์ว่า "!น้องกวาง หมดเวลาแล้วเธอคงต้องไป" พริ๊ๆจะทำจริงๆหรอครับ';
+
+/**
+ * Welcome carousel.
+ *
+ * - DM (`follow` event): all 4 cards open the LIFF URL — same as before.
+ * - Group (`join` event): mixed actions so members can poke the bot from the
+ *   bubble itself.
+ *     1 — open LIFF (same)
+ *     2 — sends the example-commands text (the user can then tap Send)
+ *     3 — opens the OA add-friend page so non-friends can friend it
+ *     4 — sends the kick-command text (so the user just taps Send to fire it)
+ */
+export function welcomeBubble(
+  liffUrl: string,
+  opts: { forGroup?: boolean } = {},
+): LineFlexMessage {
+  if (!opts.forGroup) {
+    return {
+      type: "flex",
+      altText: "ยินดีต้อนรับสู่ DearFile / Welcome to DearFile",
+      contents: {
+        type: "carousel",
+        contents: [1, 2, 3, 4].map((n) =>
+          imageBubble(`${IMAGE_ORIGIN}/liff/${n}.png`, {
+            type: "uri",
+            label: `action ${n}`,
+            uri: liffUrl,
+          }),
+        ),
+      },
+    };
+  }
+
   return {
     type: "flex",
     altText: "ยินดีต้อนรับสู่ DearFile / Welcome to DearFile",
     contents: {
       type: "carousel",
-      contents: [1, 2, 3, 4].map((n) =>
-        imageBubble(`${IMAGE_ORIGIN}/liff/${n}.png`, `action ${n}`, liffUrl),
-      ),
+      contents: [
+        imageBubble(`${IMAGE_ORIGIN}/liff/1.png`, {
+          type: "uri",
+          label: "เปิด / Open",
+          uri: liffUrl,
+        }),
+        imageBubble(`${IMAGE_ORIGIN}/liff/2.png`, {
+          type: "message",
+          label: "สั่งน้องกวาง",
+          text: GROUP_WELCOME_EXAMPLES_TEXT,
+        }),
+        imageBubble(`${IMAGE_ORIGIN}/liff/3.png`, {
+          type: "uri",
+          label: "แอด OA",
+          uri: ADD_FRIEND_OA_URL,
+        }),
+        imageBubble(`${IMAGE_ORIGIN}/liff/4.png`, {
+          type: "message",
+          label: "ไล่น้องกวาง",
+          text: GROUP_WELCOME_KICK_TEXT,
+        }),
+      ],
     },
   };
 }

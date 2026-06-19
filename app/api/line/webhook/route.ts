@@ -27,7 +27,10 @@ import {
   fetchGroupSummary,
   fetchLineContent,
   greetingBubble,
+  GROUP_LEAVE_REPLY_TEXT,
   helpBubble,
+  isGroupLeaveCommand,
+  leaveGroup,
   pushMessage,
   replyMessage,
   summaryBubble,
@@ -827,6 +830,26 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
 
     if (msg.type === "text") {
       const text = msg.text ?? "";
+
+      // Kick command — bot leaves the group with a witty one-liner.
+      // Reply first (so the user sees it before the bot disappears), then
+      // call the LINE leave API. The `leave` webhook event fired by LINE
+      // immediately after will mark the workspace as orphaned via the
+      // existing handler at the top of the file.
+      if (isGroupLeaveCommand(text)) {
+        if (event.replyToken) {
+          await replyMessage(event.replyToken, [
+            { type: "text", text: GROUP_LEAVE_REPLY_TEXT },
+          ]);
+        }
+        try {
+          await leaveGroup(groupId);
+        } catch (err) {
+          console.error("[line/webhook] leaveGroup failed:", err);
+        }
+        return [];
+      }
+
       const folderResp = await handleFolderCommand(workspace, userId, text);
       if (folderResp) return folderResp;
 
@@ -1014,7 +1037,7 @@ export async function POST(req: Request) {
             });
           }
           if (event.replyToken) {
-            await replyMessage(event.replyToken, [welcomeBubble(url)]);
+            await replyMessage(event.replyToken, [welcomeBubble(url, { forGroup: true })]);
           }
           return;
         }
