@@ -9,7 +9,8 @@
  *
  * Usage:
  *   npm run dev
- *   open http://localhost:8000/api/dev/preview-greeting          (welcome)
+ *   open http://localhost:8000/api/dev/preview-greeting            (DM welcome)
+ *   open http://localhost:8000/api/dev/preview-greeting?b=group    (group welcome)
  *   open http://localhost:8000/api/dev/preview-greeting?b=success
  *   open http://localhost:8000/api/dev/preview-greeting?b=help
  */
@@ -36,6 +37,8 @@ export async function GET(req: Request) {
         })
       : which === "help"
       ? helpBubble(liffUrl)
+      : which === "group"
+      ? welcomeBubble(liffUrl, { forGroup: true })
       : welcomeBubble(liffUrl);
 
   return Response.json(message.contents, {
