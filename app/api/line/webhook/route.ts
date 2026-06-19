@@ -70,6 +70,7 @@ import {
   createGroupWorkspace,
   findWorkspaceByLineGroup,
   markOrphaned,
+  unmarkOrphaned,
   type WorkspaceMeta,
 } from "@/lib/workspace";
 
@@ -1048,11 +1049,19 @@ export async function POST(req: Request) {
           const { groupId, userId } = getSourceContext(event);
           if (groupId && userId) {
             const summary = await fetchGroupSummary(groupId);
-            await createGroupWorkspace({
+            const ws = await createGroupWorkspace({
               lineGroupId: groupId,
               ownerId:     userId,
               name:        summary?.groupName,
             });
+            // Re-join: if the workspace was previously orphaned (bot was
+            // kicked or self-left via the kick command), clear the flag so
+            // the message handler at line ~824 doesn't bounce every
+            // incoming message with "workspace is no longer linked".
+            if (ws.orphaned) {
+              await unmarkOrphaned(ws.id);
+              ws.orphaned = false;
+            }
           }
           if (event.replyToken) {
             await replyMessage(event.replyToken, [welcomeBubble(url, { forGroup: true })]);
