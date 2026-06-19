@@ -24,12 +24,14 @@ import { after } from "next/server";
 import {
   answerBubble,
   captureResultBubble,
+  examplesBubble,
   fetchGroupSummary,
   fetchLineContent,
   greetingBubble,
   GROUP_LEAVE_REPLY_TEXT,
   helpBubble,
   isGroupLeaveCommand,
+  kickHintBubble,
   leaveGroup,
   pushMessage,
   replyMessage,
@@ -1019,6 +1021,22 @@ export async function POST(req: Request) {
         // follow → welcome carousel (DM bot was friended)
         if (event.type === "follow" && event.replyToken) {
           await replyMessage(event.replyToken, [welcomeBubble(url)]);
+          return;
+        }
+        
+        // postback → bot replies to the group with a formatted Flex bubble.
+        // Used by bubbles 2 (examples) and 4 (kick hint) of the group welcome.
+        if (event.type === "postback" && event.replyToken) {
+          const data = (event as { postback?: { data?: string } }).postback?.data ?? "";
+          let reply: LineMessage | null = null;
+          if (data === "welcome:examples") {
+            reply = examplesBubble(url);
+          } else if (data === "welcome:kick_hint") {
+            reply = kickHintBubble(url);
+          }
+          if (reply) {
+            await replyMessage(event.replyToken, [reply]);
+          }
           return;
         }
 
