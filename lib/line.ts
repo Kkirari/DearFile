@@ -32,7 +32,10 @@ export interface LineFlexMessage {
 
 export type LineMessage = LineTextMessage | LineFlexMessage;
 
-export function verifyLineSignature(rawBody: string, signature: string | null): boolean {
+export function verifyLineSignature(
+  rawBody: string,
+  signature: string | null,
+): boolean {
   if (!signature) return false;
 
   const secret = process.env.LINE_CHANNEL_SECRET;
@@ -86,7 +89,10 @@ export async function replyMessage(
  * Push a message to a user without a replyToken (charged against the LINE
  * push-message quota — use replyMessage when a token is available).
  */
-export async function pushMessage(to: string, messages: LineMessage[]): Promise<void> {
+export async function pushMessage(
+  to: string,
+  messages: LineMessage[],
+): Promise<void> {
   const res = await fetch(LINE_PUSH_URL, {
     method: "POST",
     headers: {
@@ -109,11 +115,18 @@ export async function pushMessage(to: string, messages: LineMessage[]): Promise<
 export async function fetchGroupSummary(
   groupId: string,
 ): Promise<{ groupId: string; groupName: string; pictureUrl?: string } | null> {
-  const res = await fetch(`https://api.line.me/v2/bot/group/${groupId}/summary`, {
-    headers: { Authorization: `Bearer ${accessToken()}` },
-  });
+  const res = await fetch(
+    `https://api.line.me/v2/bot/group/${groupId}/summary`,
+    {
+      headers: { Authorization: `Bearer ${accessToken()}` },
+    },
+  );
   if (!res.ok) return null;
-  return res.json() as Promise<{ groupId: string; groupName: string; pictureUrl?: string }>;
+  return res.json() as Promise<{
+    groupId: string;
+    groupName: string;
+    pictureUrl?: string;
+  }>;
 }
 
 /**
@@ -144,10 +157,22 @@ export const GROUP_LEAVE_COMMANDS: readonly string[] = [
 export const GROUP_LEAVE_REPLY_TEXT = "พริ๊ๆจะทำจริงๆหรอครับ 😢";
 
 export function isGroupLeaveCommand(text: string): boolean {
-  const t = (text ?? "").trim().toLowerCase().replace(/^[/!@]/, "").trim();
+  const t = (text ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^[/!@]/, "")
+    .trim();
   return GROUP_LEAVE_COMMANDS.some((cmd) => {
-    const normalized = cmd.trim().toLowerCase().replace(/^[/!@]/, "").trim();
-    return t === normalized || t.startsWith(`${normalized} `) || t.startsWith(`${normalized}\n`);
+    const normalized = cmd
+      .trim()
+      .toLowerCase()
+      .replace(/^[/!@]/, "")
+      .trim();
+    return (
+      t === normalized ||
+      t.startsWith(`${normalized} `) ||
+      t.startsWith(`${normalized}\n`)
+    );
   });
 }
 
@@ -161,7 +186,9 @@ export interface LineContent {
   contentType: string;
 }
 
-export async function fetchLineContent(messageId: string): Promise<LineContent> {
+export async function fetchLineContent(
+  messageId: string,
+): Promise<LineContent> {
   const res = await fetch(LINE_CONTENT_URL(messageId), {
     headers: { Authorization: `Bearer ${accessToken()}` },
   });
@@ -201,11 +228,11 @@ const IMAGE_ORIGIN =
 //   accent              #9b869c  dusty mauve (buttons / focus)
 //   muted               #b0a396  taupe
 //   border              #e0d8cc  light beige rule
-const BRAND_MAUVE     = "#9b869c";
-const CARD_CREAM      = "#fbfaf6";
-const TEXT_DARK_WARM  = "#4a4036";
-const TEXT_TAUPE      = "#b0a396";
-const BORDER_BEIGE    = "#e0d8cc";
+const BRAND_MAUVE = "#9b869c";
+const CARD_CREAM = "#fbfaf6";
+const TEXT_DARK_WARM = "#4a4036";
+const TEXT_TAUPE = "#b0a396";
+const BORDER_BEIGE = "#e0d8cc";
 
 function imageBubble(imageUrl: string, action: ImageBubbleAction) {
   return {
@@ -283,281 +310,281 @@ export function welcomeBubble(
   }
 
   return {
-      type: "flex",
-      altText: "ยินดีต้อนรับสู่ DearFile / Welcome to DearFile",
-      contents: {
-        type: "carousel",
+    type: "flex",
+    altText: "ยินดีต้อนรับสู่ DearFile / Welcome to DearFile",
+    contents: {
+      type: "carousel",
+      contents: [
+        imageBubble(`${IMAGE_ORIGIN}/liff/1.png`, {
+          type: "uri",
+          label: "เปิด / Open",
+          uri: liffUrl,
+        }),
+        // Bubble 2: bot replies with a formatted examples Flex when tapped
+        // (postback → webhook → replyMessage). No user-typed message.
+        imageBubble(`${IMAGE_ORIGIN}/liff/2.png`, {
+          type: "postback",
+          label: "สั่งน้องกวาง",
+          data: "welcome:examples",
+        }),
+        imageBubble(`${IMAGE_ORIGIN}/liff/3.png`, {
+          type: "uri",
+          label: "แอด OA",
+          uri: ADD_FRIEND_OA_URL,
+        }),
+        // Bubble 4: bot replies with a formatted kick-hint Flex when tapped
+        imageBubble(`${IMAGE_ORIGIN}/liff/4.png`, {
+          type: "postback",
+          label: "ไล่น้องกวาง",
+          data: "welcome:kick_hint",
+        }),
+      ],
+    },
+  };
+}
+
+/**
+ * Formatted "examples" reply bubble. Sent by the bot (via replyMessage) when a
+ * group member taps bubble 2 of the welcome carousel. Replaces the plain
+ * multi-line text we'd otherwise post into a busy chat.
+ */
+export function examplesBubble(liffUrl: string): LineFlexMessage {
+  return {
+    type: "flex",
+    altText: "ตัวอย่างคำสั่งน้องกวาง / Example DearFile commands",
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      styles: {
+        header: { backgroundColor: BRAND_MAUVE },
+        body: { backgroundColor: CARD_CREAM },
+        footer: { backgroundColor: CARD_CREAM },
+      },
+      header: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "20px",
         contents: [
-          imageBubble(`${IMAGE_ORIGIN}/liff/1.png`, {
-            type: "uri",
-            label: "เปิด / Open",
-            uri: liffUrl,
-          }),
-          // Bubble 2: bot replies with a formatted examples Flex when tapped
-          // (postback → webhook → replyMessage). No user-typed message.
-          imageBubble(`${IMAGE_ORIGIN}/liff/2.png`, {
-            type: "postback",
-            label: "สั่งน้องกวาง",
-            data: "welcome:examples",
-          }),
-          imageBubble(`${IMAGE_ORIGIN}/liff/3.png`, {
-            type: "uri",
-            label: "แอด OA",
-            uri: ADD_FRIEND_OA_URL,
-          }),
-          // Bubble 4: bot replies with a formatted kick-hint Flex when tapped
-          imageBubble(`${IMAGE_ORIGIN}/liff/4.png`, {
-            type: "postback",
-            label: "ไล่น้องกวาง",
-            data: "welcome:kick_hint",
-          }),
+          {
+            type: "text",
+            text: "🦌 สั่งน้องกวางได้หลายแบบ",
+            weight: "bold",
+            color: "#FFFFFF",
+            size: "lg",
+            wrap: true,
+          },
+          {
+            type: "text",
+            text: "พิมพ์ข้อความนี้ส่งมาในกลุ่มเลย",
+            color: "#FFFFFFCC",
+            size: "xs",
+            margin: "sm",
+            wrap: true,
+          },
         ],
       },
-    };
-      }
-
-      /**
-     * Formatted "examples" reply bubble. Sent by the bot (via replyMessage) when a
-     * group member taps bubble 2 of the welcome carousel. Replaces the plain
-     * multi-line text we'd otherwise post into a busy chat.
-     */
-    export function examplesBubble(liffUrl: string): LineFlexMessage {
-      return {
-        type: "flex",
-        altText: "ตัวอย่างคำสั่งน้องกวาง / Example DearFile commands",
-        contents: {
-          type: "bubble",
-          size: "kilo",
-          styles: {
-            header: { backgroundColor: BRAND_MAUVE },
-            body:   { backgroundColor: CARD_CREAM },
-            footer: { backgroundColor: CARD_CREAM },
-          },
-          header: {
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        spacing: "md",
+        contents: [
+          {
             type: "box",
-            layout: "vertical",
-            paddingAll: "20px",
-            contents: [
-              {
-                type: "text",
-                text: "🦌 สั่งน้องกวางได้หลายแบบ",
-                weight: "bold",
-                color: "#FFFFFF",
-                size: "lg",
-                wrap: true,
-              },
-              {
-                type: "text",
-                text: "พิมพ์ข้อความนี้ส่งมาในกลุ่มเลย",
-                color: "#FFFFFFCC",
-                size: "xs",
-                margin: "sm",
-                wrap: true,
-              },
-            ],
-          },
-          body: {
-            type: "box",
-            layout: "vertical",
-            paddingAll: "16px",
+            layout: "horizontal",
             spacing: "md",
+            alignItems: "center",
             contents: [
-              {
-                type: "box",
-                layout: "horizontal",
-                spacing: "md",
-                alignItems: "center",
-                contents: [
-                  { type: "text", text: "🐱", size: "xxl", flex: 0 },
-                  {
-                    type: "box",
-                    layout: "vertical",
-                    flex: 1,
-                    spacing: "xs",
-                    contents: [
-                      {
-                        type: "text",
-                        text: "หารูปแมวส้ม",
-                        weight: "bold",
-                        color: TEXT_DARK_WARM,
-                        size: "sm",
-                      },
-                      {
-                        type: "text",
-                        text: "!น้องกวาง หารูปแมวส้ม",
-                        color: BRAND_MAUVE,
-                        size: "xs",
-                        wrap: true,
-                      },
-                    ],
-                  },
-                ],
-              },
-              {
-                type: "separator",
-                margin: "xs",
-                color: BORDER_BEIGE,
-              },
-              {
-                type: "box",
-                layout: "horizontal",
-                spacing: "md",
-                alignItems: "center",
-                contents: [
-                  { type: "text", text: "📁", size: "xxl", flex: 0 },
-                  {
-                    type: "box",
-                    layout: "vertical",
-                    flex: 1,
-                    spacing: "xs",
-                    contents: [
-                      {
-                        type: "text",
-                        text: "สร้างโฟลเดอร์",
-                        weight: "bold",
-                        color: TEXT_DARK_WARM,
-                        size: "sm",
-                      },
-                      {
-                        type: "text",
-                        text: "!น้องกวาง สร้างโฟลเดอร์ชื่อการบ้านครั้งที่1",
-                        color: BRAND_MAUVE,
-                        size: "xs",
-                        wrap: true,
-                      },
-                    ],
-                  },
-                ],
-              },
-            ],
-          },
-          footer: {
-            type: "box",
-            layout: "vertical",
-            paddingAll: "16px",
-            paddingTop: "0px",
-            contents: [
-              {
-                type: "button",
-                style: "primary",
-                color: BRAND_MAUVE,
-                height: "sm",
-                action: {
-                  type: "uri",
-                  label: "เปิด DearFile",
-                  uri: liffUrl,
-                },
-              },
-            ],
-          },
-        },
-      };
-    }
-
-    /**
-     * Formatted "kick" hint bubble. Sent by the bot when a group member taps
-     * bubble 4 of the welcome carousel. Shows the exact kick phrase in a
-     * highlighted box plus what the bot will reply.
-     */
-    export function kickHintBubble(liffUrl: string): LineFlexMessage {
-      return {
-        type: "flex",
-        altText: "วิธีไล่น้องกวางออกจากกลุ่ม / How to kick DearFile",
-        contents: {
-          type: "bubble",
-          size: "kilo",
-          styles: {
-            header: { backgroundColor: BRAND_MAUVE },
-            body:   { backgroundColor: CARD_CREAM },
-            footer: { backgroundColor: CARD_CREAM },
-          },
-          header: {
-            type: "box",
-            layout: "vertical",
-            paddingAll: "20px",
-            contents: [
-              {
-                type: "text",
-                text: "👋 อยากไล่น้องกวาง?",
-                weight: "bold",
-                color: "#FFFFFF",
-                size: "lg",
-                wrap: true,
-              },
-              {
-                type: "text",
-                text: "พิมพ์ข้อความนี้ส่งมาในกลุ่มเลย",
-                color: "#FFFFFFCC",
-                size: "xs",
-                margin: "sm",
-                wrap: true,
-              },
-            ],
-          },
-          body: {
-            type: "box",
-            layout: "vertical",
-            paddingAll: "20px",
-            spacing: "md",
-            contents: [
+              { type: "text", text: "🐱", size: "xxl", flex: 0 },
               {
                 type: "box",
                 layout: "vertical",
-                paddingAll: "12px",
-                backgroundColor: "#FFFFFF",
-                cornerRadius: "md",
+                flex: 1,
+                spacing: "xs",
                 contents: [
                   {
                     type: "text",
-                    text: "!น้องกวาง หมดเวลาแล้วเธอคงต้องไป",
-                    size: "sm",
-                    color: TEXT_DARK_WARM,
-                    wrap: true,
+                    text: "หารูปแมวส้ม",
                     weight: "bold",
+                    color: TEXT_DARK_WARM,
+                    size: "sm",
+                  },
+                  {
+                    type: "text",
+                    text: "!น้องกวาง หารูปแมวส้ม",
+                    color: BRAND_MAUVE,
+                    size: "xs",
+                    wrap: true,
                   },
                 ],
               },
+            ],
+          },
+          {
+            type: "separator",
+            margin: "xs",
+            color: BORDER_BEIGE,
+          },
+          {
+            type: "box",
+            layout: "horizontal",
+            spacing: "md",
+            alignItems: "center",
+            contents: [
+              { type: "text", text: "📁", size: "xxl", flex: 0 },
               {
-                type: "text",
-                text: "พริ๊ๆจะตอบกลับ \"พริ๊ๆจะทำจริงๆหรอครับ 😢\" แล้วออกจากกลุ่มเลย",
-                size: "xs",
-                color: TEXT_TAUPE,
-                wrap: true,
+                type: "box",
+                layout: "vertical",
+                flex: 1,
+                spacing: "xs",
+                contents: [
+                  {
+                    type: "text",
+                    text: "สร้างโฟลเดอร์",
+                    weight: "bold",
+                    color: TEXT_DARK_WARM,
+                    size: "sm",
+                  },
+                  {
+                    type: "text",
+                    text: "!น้องกวาง สร้างโฟลเดอร์ชื่อการบ้านครั้งที่1",
+                    color: BRAND_MAUVE,
+                    size: "xs",
+                    wrap: true,
+                  },
+                ],
               },
             ],
           },
-          footer: {
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        paddingTop: "0px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: BRAND_MAUVE,
+            height: "sm",
+            action: {
+              type: "uri",
+              label: "เปิด DearFile",
+              uri: liffUrl,
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+/**
+ * Formatted "kick" hint bubble. Sent by the bot when a group member taps
+ * bubble 4 of the welcome carousel. Shows the exact kick phrase in a
+ * highlighted box plus what the bot will reply.
+ */
+export function kickHintBubble(liffUrl: string): LineFlexMessage {
+  return {
+    type: "flex",
+    altText: "วิธีไล่น้องกวางออกจากกลุ่ม / How to kick DearFile",
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      styles: {
+        header: { backgroundColor: BRAND_MAUVE },
+        body: { backgroundColor: CARD_CREAM },
+        footer: { backgroundColor: CARD_CREAM },
+      },
+      header: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "20px",
+        contents: [
+          {
+            type: "text",
+            text: "👋 อยากไล่น้องกวาง?",
+            weight: "bold",
+            color: "#FFFFFF",
+            size: "lg",
+            wrap: true,
+          },
+          {
+            type: "text",
+            text: "พิมพ์ข้อความนี้ส่งมาในกลุ่มเลย",
+            color: "#FFFFFFCC",
+            size: "xs",
+            margin: "sm",
+            wrap: true,
+          },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "20px",
+        spacing: "md",
+        contents: [
+          {
             type: "box",
             layout: "vertical",
-            paddingAll: "16px",
-            paddingTop: "0px",
+            paddingAll: "12px",
+            backgroundColor: "#FFFFFF",
+            cornerRadius: "md",
             contents: [
               {
-                type: "button",
-                style: "primary",
-                color: BRAND_MAUVE,
-                height: "sm",
-                action: {
-                  type: "uri",
-                  label: "เปิด DearFile",
-                  uri: liffUrl,
-                },
+                type: "text",
+                text: "!น้องกวาง หมดเวลาแล้วเธอคงต้องไป",
+                size: "sm",
+                color: TEXT_DARK_WARM,
+                wrap: true,
+                weight: "bold",
               },
             ],
           },
-        },
-      };
-    }
+          {
+            type: "text",
+            text: 'พริ๊ๆจะตอบกลับ "ต้องการผมเมื่อไรเรียกได้ตลอดนะพริ๊ๆ 😢" แล้วออกจากกลุ่มเลย',
+            size: "xs",
+            color: TEXT_TAUPE,
+            wrap: true,
+          },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        paddingTop: "0px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: BRAND_MAUVE,
+            height: "sm",
+            action: {
+              type: "uri",
+              label: "เปิด DearFile",
+              uri: liffUrl,
+            },
+          },
+        ],
+      },
+    },
+  };
+}
 
-    /**
-     * Compact confirmation bubble shown after a chat-uploaded file lands in S3.
-   *
-   * Deliberately minimal — a `micro` bubble with just a ✓ + filename, one muted
-   * folder line, and an Open button — so it barely takes any room in a busy chat.
-   * `opts.liffUrl` is a deep link that opens the saved file directly in the LIFF
-   * app (built by the webhook). `workspaceName` is set for shared-workspace saves
-   * and is shown alongside the folder so members see which space it joined.
-   */
+/**
+ * Compact confirmation bubble shown after a chat-uploaded file lands in S3.
+ *
+ * Deliberately minimal — a `micro` bubble with just a ✓ + filename, one muted
+ * folder line, and an Open button — so it barely takes any room in a busy chat.
+ * `opts.liffUrl` is a deep link that opens the saved file directly in the LIFF
+ * app (built by the webhook). `workspaceName` is set for shared-workspace saves
+ * and is shown alongside the folder so members see which space it joined.
+ */
 export interface UploadSuccessOpts {
   filename: string;
   folderName: string;
@@ -577,7 +604,7 @@ export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
       type: "bubble",
       size: "micro",
       styles: {
-        body:   { backgroundColor: CARD_CREAM },
+        body: { backgroundColor: CARD_CREAM },
         footer: { backgroundColor: CARD_CREAM },
       },
       body: {
@@ -654,7 +681,7 @@ export function helpBubble(liffUrl: string): LineFlexMessage {
       size: "kilo",
       styles: {
         header: { backgroundColor: BRAND_MAUVE },
-        body:   { backgroundColor: CARD_CREAM },
+        body: { backgroundColor: CARD_CREAM },
         footer: { backgroundColor: CARD_CREAM },
       },
       header: {
@@ -794,7 +821,10 @@ export interface AnswerRow {
   uri: string;
 }
 
-export function answerBubble(answer: string, rows: AnswerRow[]): LineFlexMessage {
+export function answerBubble(
+  answer: string,
+  rows: AnswerRow[],
+): LineFlexMessage {
   const bodyContents: unknown[] = [
     {
       type: "text",
@@ -920,7 +950,7 @@ export function summaryBubble(
       size: "kilo",
       styles: {
         header: { backgroundColor: BRAND_MAUVE },
-        body:   { backgroundColor: CARD_CREAM },
+        body: { backgroundColor: CARD_CREAM },
         footer: { backgroundColor: CARD_CREAM },
       },
       header: {
@@ -963,7 +993,11 @@ export function summaryBubble(
             style: "primary",
             color: BRAND_MAUVE,
             height: "sm",
-            action: { type: "uri", label: "เปิด DearFile / Open", uri: liffHome },
+            action: {
+              type: "uri",
+              label: "เปิด DearFile / Open",
+              uri: liffHome,
+            },
           },
         ],
       },
@@ -984,11 +1018,19 @@ export interface CaptureView {
   tags?: string[] | null;
 }
 
-export function captureResultBubble(item: CaptureView, liffTimelineUrl: string): LineFlexMessage {
+export function captureResultBubble(
+  item: CaptureView,
+  liffTimelineUrl: string,
+): LineFlexMessage {
   const icon = item.type === "link" ? "🔗" : "📝";
-  const title = item.title?.trim() || (item.type === "link" ? "Saved link" : "Saved note");
+  const title =
+    item.title?.trim() || (item.type === "link" ? "Saved link" : "Saved note");
   const summary = item.summary?.trim() || "—";
-  const tagLine = (item.tags ?? []).filter(Boolean).slice(0, 5).map((t) => `#${t}`).join("  ");
+  const tagLine = (item.tags ?? [])
+    .filter(Boolean)
+    .slice(0, 5)
+    .map((t) => `#${t}`)
+    .join("  ");
 
   const bodyContents: unknown[] = [
     {
@@ -1018,7 +1060,14 @@ export function captureResultBubble(item: CaptureView, liffTimelineUrl: string):
     },
   ];
   if (tagLine) {
-    bodyContents.push({ type: "text", text: tagLine, size: "xs", color: TEXT_TAUPE, wrap: true, margin: "md" });
+    bodyContents.push({
+      type: "text",
+      text: tagLine,
+      size: "xs",
+      color: TEXT_TAUPE,
+      wrap: true,
+      margin: "md",
+    });
   }
 
   const footerButtons: unknown[] = [
@@ -1027,7 +1076,11 @@ export function captureResultBubble(item: CaptureView, liffTimelineUrl: string):
       style: "primary",
       color: BRAND_MAUVE,
       height: "sm",
-      action: { type: "uri", label: "ดูใน DearFile / Open", uri: liffTimelineUrl },
+      action: {
+        type: "uri",
+        label: "ดูใน DearFile / Open",
+        uri: liffTimelineUrl,
+      },
     },
   ];
   if (item.type === "link" && item.sourceUrl) {
@@ -1047,7 +1100,7 @@ export function captureResultBubble(item: CaptureView, liffTimelineUrl: string):
       size: "kilo",
       styles: {
         header: { backgroundColor: BRAND_MAUVE },
-        body:   { backgroundColor: CARD_CREAM },
+        body: { backgroundColor: CARD_CREAM },
         footer: { backgroundColor: CARD_CREAM },
       },
       header: {
@@ -1095,7 +1148,10 @@ export function greetingBubble(liffUrl: string): LineFlexMessage {
     contents: {
       type: "bubble",
       size: "kilo",
-      styles: { body: { backgroundColor: CARD_CREAM }, footer: { backgroundColor: CARD_CREAM } },
+      styles: {
+        body: { backgroundColor: CARD_CREAM },
+        footer: { backgroundColor: CARD_CREAM },
+      },
       body: {
         type: "box",
         layout: "vertical",
@@ -1120,7 +1176,7 @@ export function greetingBubble(liffUrl: string): LineFlexMessage {
           { type: "separator", margin: "md", color: BORDER_BEIGE },
           {
             type: "text",
-            text: 'Hi! I\'m Nong Kwang — ask me to find any file you\'ve saved, e.g. "last month\'s receipt."',
+            text: "Hi! I'm Nong Kwang — ask me to find any file you've saved, e.g. \"last month's receipt.\"",
             size: "xs",
             color: TEXT_TAUPE,
             margin: "sm",
@@ -1139,7 +1195,11 @@ export function greetingBubble(liffUrl: string): LineFlexMessage {
             style: "primary",
             color: BRAND_MAUVE,
             height: "sm",
-            action: { type: "uri", label: "เปิด DearFile / Open", uri: liffUrl },
+            action: {
+              type: "uri",
+              label: "เปิด DearFile / Open",
+              uri: liffUrl,
+            },
           },
         ],
       },

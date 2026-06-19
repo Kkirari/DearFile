@@ -439,6 +439,26 @@ export function markOrphaned(workspaceId: string): Promise<WorkspaceMeta | null>
   });
 }
 
+/**
+ * Inverse of markOrphaned. Called when the bot is re-added to a group whose
+ * workspace was previously marked orphaned (bot was kicked / self-left via
+ * the kick command). Without this, every subsequent message in the group
+ * trips the "workspace is no longer linked" warning at route.ts ~824.
+ */
+export function unmarkOrphaned(workspaceId: string): Promise<WorkspaceMeta | null> {
+  return withLock(metaLocks, workspaceId, async () => {
+    try {
+      return await mutateMeta(workspaceId, (m) => {
+        if (!m.orphaned) return META_SKIP;
+        m.orphaned = false;
+      });
+    } catch (err) {
+      if (err instanceof AuthError && err.statusCode === 404) return null;
+      throw err;
+    }
+  });
+}
+
 // ── Folder permission lookup ──────────────────────────────────────────────
 
 /**
