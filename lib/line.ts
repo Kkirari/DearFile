@@ -229,13 +229,16 @@ function imageBubble(imageUrl: string, action: ImageBubbleAction) {
 }
 
 /**
- * Action attached to an image bubble. `uri` opens a link; `message` sends a
- * user-typed text (LINE echoes it into the chat and forwards a message event
- * to the webhook — useful for triggering commands without typing).
+ * Action attached to an image bubble.
+ * - `uri`      — opens a link
+ * - `message`  — sends a user-typed text (LINE echoes it as if the user typed it)
+ * - `postback` — fires a silent webhook event; bot replies via replyMessage /
+ *                pushMessage. Used when the OA itself should send the message.
  */
 export type ImageBubbleAction =
   | { type: "uri"; label?: string; uri: string }
-  | { type: "message"; label?: string; text: string };
+  | { type: "message"; label?: string; text: string }
+  | { type: "postback"; label?: string; data: string };
 
 const ADD_FRIEND_OA_URL = "https://line.me/R/ti/p/@297ybspj";
 
@@ -280,45 +283,281 @@ export function welcomeBubble(
   }
 
   return {
-    type: "flex",
-    altText: "ยินดีต้อนรับสู่ DearFile / Welcome to DearFile",
-    contents: {
-      type: "carousel",
-      contents: [
-        imageBubble(`${IMAGE_ORIGIN}/liff/1.png`, {
-          type: "uri",
-          label: "เปิด / Open",
-          uri: liffUrl,
-        }),
-        imageBubble(`${IMAGE_ORIGIN}/liff/2.png`, {
-          type: "message",
-          label: "สั่งน้องกวาง",
-          text: GROUP_WELCOME_EXAMPLES_TEXT,
-        }),
-        imageBubble(`${IMAGE_ORIGIN}/liff/3.png`, {
-          type: "uri",
-          label: "แอด OA",
-          uri: ADD_FRIEND_OA_URL,
-        }),
-        imageBubble(`${IMAGE_ORIGIN}/liff/4.png`, {
-          type: "message",
-          label: "ไล่น้องกวาง",
-          text: GROUP_WELCOME_KICK_TEXT,
-        }),
-      ],
-    },
-  };
-}
+      type: "flex",
+      altText: "ยินดีต้อนรับสู่ DearFile / Welcome to DearFile",
+      contents: {
+        type: "carousel",
+        contents: [
+          imageBubble(`${IMAGE_ORIGIN}/liff/1.png`, {
+            type: "uri",
+            label: "เปิด / Open",
+            uri: liffUrl,
+          }),
+          // Bubble 2: bot replies with a formatted examples Flex when tapped
+          // (postback → webhook → replyMessage). No user-typed message.
+          imageBubble(`${IMAGE_ORIGIN}/liff/2.png`, {
+            type: "postback",
+            label: "สั่งน้องกวาง",
+            data: "welcome:examples",
+          }),
+          imageBubble(`${IMAGE_ORIGIN}/liff/3.png`, {
+            type: "uri",
+            label: "แอด OA",
+            uri: ADD_FRIEND_OA_URL,
+          }),
+          // Bubble 4: bot replies with a formatted kick-hint Flex when tapped
+          imageBubble(`${IMAGE_ORIGIN}/liff/4.png`, {
+            type: "postback",
+            label: "ไล่น้องกวาง",
+            data: "welcome:kick_hint",
+          }),
+        ],
+      },
+    };
+      }
 
-/**
- * Compact confirmation bubble shown after a chat-uploaded file lands in S3.
- *
- * Deliberately minimal — a `micro` bubble with just a ✓ + filename, one muted
- * folder line, and an Open button — so it barely takes any room in a busy chat.
- * `opts.liffUrl` is a deep link that opens the saved file directly in the LIFF
- * app (built by the webhook). `workspaceName` is set for shared-workspace saves
- * and is shown alongside the folder so members see which space it joined.
- */
+      /**
+     * Formatted "examples" reply bubble. Sent by the bot (via replyMessage) when a
+     * group member taps bubble 2 of the welcome carousel. Replaces the plain
+     * multi-line text we'd otherwise post into a busy chat.
+     */
+    export function examplesBubble(liffUrl: string): LineFlexMessage {
+      return {
+        type: "flex",
+        altText: "ตัวอย่างคำสั่งน้องกวาง / Example DearFile commands",
+        contents: {
+          type: "bubble",
+          size: "kilo",
+          styles: {
+            header: { backgroundColor: BRAND_MAUVE },
+            body:   { backgroundColor: CARD_CREAM },
+            footer: { backgroundColor: CARD_CREAM },
+          },
+          header: {
+            type: "box",
+            layout: "vertical",
+            paddingAll: "20px",
+            contents: [
+              {
+                type: "text",
+                text: "🦌 สั่งน้องกวางได้หลายแบบ",
+                weight: "bold",
+                color: "#FFFFFF",
+                size: "lg",
+                wrap: true,
+              },
+              {
+                type: "text",
+                text: "พิมพ์ข้อความนี้ส่งมาในกลุ่มเลย",
+                color: "#FFFFFFCC",
+                size: "xs",
+                margin: "sm",
+                wrap: true,
+              },
+            ],
+          },
+          body: {
+            type: "box",
+            layout: "vertical",
+            paddingAll: "16px",
+            spacing: "md",
+            contents: [
+              {
+                type: "box",
+                layout: "horizontal",
+                spacing: "md",
+                alignItems: "center",
+                contents: [
+                  { type: "text", text: "🐱", size: "xxl", flex: 0 },
+                  {
+                    type: "box",
+                    layout: "vertical",
+                    flex: 1,
+                    spacing: "xs",
+                    contents: [
+                      {
+                        type: "text",
+                        text: "หารูปแมวส้ม",
+                        weight: "bold",
+                        color: TEXT_DARK_WARM,
+                        size: "sm",
+                      },
+                      {
+                        type: "text",
+                        text: "!น้องกวาง หารูปแมวส้ม",
+                        color: BRAND_MAUVE,
+                        size: "xs",
+                        wrap: true,
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                type: "separator",
+                margin: "xs",
+                color: BORDER_BEIGE,
+              },
+              {
+                type: "box",
+                layout: "horizontal",
+                spacing: "md",
+                alignItems: "center",
+                contents: [
+                  { type: "text", text: "📁", size: "xxl", flex: 0 },
+                  {
+                    type: "box",
+                    layout: "vertical",
+                    flex: 1,
+                    spacing: "xs",
+                    contents: [
+                      {
+                        type: "text",
+                        text: "สร้างโฟลเดอร์",
+                        weight: "bold",
+                        color: TEXT_DARK_WARM,
+                        size: "sm",
+                      },
+                      {
+                        type: "text",
+                        text: "!น้องกวาง สร้างโฟลเดอร์ชื่อการบ้านครั้งที่1",
+                        color: BRAND_MAUVE,
+                        size: "xs",
+                        wrap: true,
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          footer: {
+            type: "box",
+            layout: "vertical",
+            paddingAll: "16px",
+            paddingTop: "0px",
+            contents: [
+              {
+                type: "button",
+                style: "primary",
+                color: BRAND_MAUVE,
+                height: "sm",
+                action: {
+                  type: "uri",
+                  label: "เปิด DearFile",
+                  uri: liffUrl,
+                },
+              },
+            ],
+          },
+        },
+      };
+    }
+
+    /**
+     * Formatted "kick" hint bubble. Sent by the bot when a group member taps
+     * bubble 4 of the welcome carousel. Shows the exact kick phrase in a
+     * highlighted box plus what the bot will reply.
+     */
+    export function kickHintBubble(liffUrl: string): LineFlexMessage {
+      return {
+        type: "flex",
+        altText: "วิธีไล่น้องกวางออกจากกลุ่ม / How to kick DearFile",
+        contents: {
+          type: "bubble",
+          size: "kilo",
+          styles: {
+            header: { backgroundColor: BRAND_MAUVE },
+            body:   { backgroundColor: CARD_CREAM },
+            footer: { backgroundColor: CARD_CREAM },
+          },
+          header: {
+            type: "box",
+            layout: "vertical",
+            paddingAll: "20px",
+            contents: [
+              {
+                type: "text",
+                text: "👋 อยากไล่น้องกวาง?",
+                weight: "bold",
+                color: "#FFFFFF",
+                size: "lg",
+                wrap: true,
+              },
+              {
+                type: "text",
+                text: "พิมพ์ข้อความนี้ส่งมาในกลุ่มเลย",
+                color: "#FFFFFFCC",
+                size: "xs",
+                margin: "sm",
+                wrap: true,
+              },
+            ],
+          },
+          body: {
+            type: "box",
+            layout: "vertical",
+            paddingAll: "20px",
+            spacing: "md",
+            contents: [
+              {
+                type: "box",
+                layout: "vertical",
+                paddingAll: "12px",
+                backgroundColor: "#FFFFFF",
+                cornerRadius: "md",
+                contents: [
+                  {
+                    type: "text",
+                    text: "!น้องกวาง หมดเวลาแล้วเธอคงต้องไป",
+                    size: "sm",
+                    color: TEXT_DARK_WARM,
+                    wrap: true,
+                    weight: "bold",
+                  },
+                ],
+              },
+              {
+                type: "text",
+                text: "พริ๊ๆจะตอบกลับ \"พริ๊ๆจะทำจริงๆหรอครับ 😢\" แล้วออกจากกลุ่มเลย",
+                size: "xs",
+                color: TEXT_TAUPE,
+                wrap: true,
+              },
+            ],
+          },
+          footer: {
+            type: "box",
+            layout: "vertical",
+            paddingAll: "16px",
+            paddingTop: "0px",
+            contents: [
+              {
+                type: "button",
+                style: "primary",
+                color: BRAND_MAUVE,
+                height: "sm",
+                action: {
+                  type: "uri",
+                  label: "เปิด DearFile",
+                  uri: liffUrl,
+                },
+              },
+            ],
+          },
+        },
+      };
+    }
+
+    /**
+     * Compact confirmation bubble shown after a chat-uploaded file lands in S3.
+   *
+   * Deliberately minimal — a `micro` bubble with just a ✓ + filename, one muted
+   * folder line, and an Open button — so it barely takes any room in a busy chat.
+   * `opts.liffUrl` is a deep link that opens the saved file directly in the LIFF
+   * app (built by the webhook). `workspaceName` is set for shared-workspace saves
+   * and is shown alongside the folder so members see which space it joined.
+   */
 export interface UploadSuccessOpts {
   filename: string;
   folderName: string;

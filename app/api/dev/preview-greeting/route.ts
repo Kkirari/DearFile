@@ -11,11 +11,19 @@
  *   npm run dev
  *   open http://localhost:8000/api/dev/preview-greeting            (DM welcome)
  *   open http://localhost:8000/api/dev/preview-greeting?b=group    (group welcome)
+ *   open http://localhost:8000/api/dev/preview-greeting?b=examples (examples reply)
+ *   open http://localhost:8000/api/dev/preview-greeting?b=kick     (kick-hint reply)
  *   open http://localhost:8000/api/dev/preview-greeting?b=success
  *   open http://localhost:8000/api/dev/preview-greeting?b=help
  */
 
-import { helpBubble, uploadSuccessBubble, welcomeBubble } from "@/lib/line";
+import {
+  examplesBubble,
+  helpBubble,
+  kickHintBubble,
+  uploadSuccessBubble,
+  welcomeBubble,
+} from "@/lib/line";
 
 export async function GET(req: Request) {
   if (process.env.NODE_ENV === "production") {
@@ -39,6 +47,10 @@ export async function GET(req: Request) {
       ? helpBubble(liffUrl)
       : which === "group"
       ? welcomeBubble(liffUrl, { forGroup: true })
+      : which === "examples"
+      ? examplesBubble(liffUrl)
+      : which === "kick"
+      ? kickHintBubble(liffUrl)
       : welcomeBubble(liffUrl);
 
   return Response.json(message.contents, {
