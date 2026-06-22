@@ -33,27 +33,40 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
   const { setCurrentWorkspace } = useWorkspace();
 
   // All files across inbox + every folder — used for Recent and unsorted count
-  const { files, loading: filesLoading, refresh: refreshFiles } = useFiles("all");
-  const { folders, loading: foldersLoading, refresh: refreshFolders } = useFolders();
+  const {
+    files,
+    loading: filesLoading,
+    refresh: refreshFiles,
+  } = useFiles("all");
+  const {
+    folders,
+    loading: foldersLoading,
+    refresh: refreshFolders,
+  } = useFolders();
 
   // ── Deep link from the LINE save-card "Open" button ──────────────────────
   // The bot builds `?file=<key>[&ws=<id>]`; LIFF forwards it here. On first
   // mount we set the right workspace scope, resolve the file, and open its
   // detail sheet — landing the user straight on the file they just saved.
-  const [deepLinkFile, setDeepLinkFile]         = useState<FileItem | null>(null);
-  const [deepLinkLightbox, setDeepLinkLightbox] = useState<FileItem | null>(null);
+  const [deepLinkFile, setDeepLinkFile] = useState<FileItem | null>(null);
+  const [deepLinkLightbox, setDeepLinkLightbox] = useState<FileItem | null>(
+    null,
+  );
   const deepLinkHandled = useRef(false);
 
   useEffect(() => {
     if (deepLinkHandled.current) return;
     deepLinkHandled.current = true;
 
-    const params  = new URLSearchParams(window.location.search);
+    const params = new URLSearchParams(window.location.search);
     const fileKey = params.get("file");
-    const ws      = params.get("ws");
-    if (!fileKey) return;
+    const ws = params.get("ws");
 
     if (ws) setCurrentWorkspace(ws);
+    if (!fileKey) {
+      if (ws) window.history.replaceState(null, "", window.location.pathname);
+      return;
+    }
 
     // Clear the params so a refresh / re-render doesn't reopen the sheet.
     window.history.replaceState(null, "", window.location.pathname);
@@ -66,7 +79,7 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
       try {
         const res = await apiFetch(url);
         if (!res.ok) return; // deleted / no access → just boot to home
-        const { file } = await res.json() as { file: FileItem };
+        const { file } = (await res.json()) as { file: FileItem };
         setDeepLinkFile(file);
       } catch {
         /* network hiccup → boot to home, no error */
@@ -77,7 +90,12 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
   // ── Deep link to a tab (capture result bubble → ?tab=timeline) ────────────
   useEffect(() => {
     const tab = new URLSearchParams(window.location.search).get("tab");
-    if (tab === "timeline" || tab === "folders" || tab === "profile" || tab === "home") {
+    if (
+      tab === "timeline" ||
+      tab === "folders" ||
+      tab === "profile" ||
+      tab === "home"
+    ) {
       setActiveNav(tab as NavId);
     }
   }, []);
@@ -89,11 +107,11 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
   const { tr } = useLanguage();
 
   const NAV_ITEMS = [
-    { id: "home"     as NavId, label: tr.navHome,     icon: Home       },
-    { id: "timeline" as NavId, label: tr.navTimeline, icon: Newspaper  },
-    { id: "search"   as NavId, label: tr.navSearch,   icon: Search     },
-    { id: "folders"  as NavId, label: tr.navFolders,  icon: FolderOpen },
-    { id: "profile"  as NavId, label: tr.navProfile,  icon: User       },
+    { id: "home" as NavId, label: tr.navHome, icon: Home },
+    { id: "timeline" as NavId, label: tr.navTimeline, icon: Newspaper },
+    { id: "search" as NavId, label: tr.navSearch, icon: Search },
+    { id: "folders" as NavId, label: tr.navFolders, icon: FolderOpen },
+    { id: "profile" as NavId, label: tr.navProfile, icon: User },
   ];
 
   function navigate(tab: string) {
@@ -104,7 +122,6 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
 
   return (
     <div className="relative min-h-dvh bg-[#f4f3ee] dark:bg-[#1c1a18]">
-
       {/* ── ACTIVE SCREEN ── */}
       {activeNav === "home" && (
         <HomeTab
@@ -170,7 +187,11 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
               key={id}
               onClick={() => {
                 navigate(id);
-                try { navigator.vibrate?.(8); } catch { /* ignore */ }
+                try {
+                  navigator.vibrate?.(8);
+                } catch {
+                  /* ignore */
+                }
               }}
               aria-current={isActive ? "page" : undefined}
               aria-label={label}
@@ -209,8 +230,16 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
           folders={folders}
           onClose={() => setDeepLinkFile(null)}
           onOpenLightbox={() => setDeepLinkLightbox(deepLinkFile)}
-          onDeleted={() => { setDeepLinkFile(null); refreshFiles(); refreshFolders(); }}
-          onMoved={() => { setDeepLinkFile(null); refreshFiles(); refreshFolders(); }}
+          onDeleted={() => {
+            setDeepLinkFile(null);
+            refreshFiles();
+            refreshFolders();
+          }}
+          onMoved={() => {
+            setDeepLinkFile(null);
+            refreshFiles();
+            refreshFolders();
+          }}
         />
       )}
       {deepLinkLightbox && (

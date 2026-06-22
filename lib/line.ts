@@ -592,6 +592,12 @@ export interface UploadSuccessOpts {
   workspaceName?: string;
 }
 
+export interface UploadBatchSuccessOpts {
+  files: UploadSuccessOpts[];
+  liffUrl: string;
+  workspaceName?: string;
+}
+
 export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
   const folderLine = opts.workspaceName
     ? `👥 ${opts.workspaceName} · 📁 ${opts.folderName}`
@@ -672,6 +678,130 @@ export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
 /**
  * Friendly help bubble shown when the user texts the OA (vs sending media).
  */
+export function uploadBatchSuccessBubble(
+  opts: UploadBatchSuccessOpts,
+): LineFlexMessage {
+  const shown = opts.files.slice(0, 5);
+  const hiddenCount = Math.max(opts.files.length - shown.length, 0);
+  const folders = Array.from(
+    new Set(opts.files.map((f) => f.folderName)),
+  ).slice(0, 2);
+  const folderLine = opts.workspaceName
+    ? `👥 ${opts.workspaceName} · 📁 ${folders.join(", ")}${folders.length < new Set(opts.files.map((f) => f.folderName)).size ? "…" : ""}`
+    : `📁 ${folders.join(", ")}${folders.length < new Set(opts.files.map((f) => f.folderName)).size ? "…" : ""}`;
+
+  return {
+    type: "flex",
+    altText: `บันทึก ${opts.files.length} ไฟล์แล้ว / Saved ${opts.files.length} files`,
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      styles: {
+        header: { backgroundColor: BRAND_MAUVE },
+        body: { backgroundColor: CARD_CREAM },
+        footer: { backgroundColor: CARD_CREAM },
+      },
+      header: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "18px",
+        spacing: "xs",
+        contents: [
+          {
+            type: "text",
+            text: `✓ บันทึกแล้ว ${opts.files.length} ไฟล์`,
+            weight: "bold",
+            color: "#FFFFFF",
+            size: "lg",
+            wrap: true,
+          },
+          {
+            type: "text",
+            text: "Saved as one batch, no chat spam",
+            color: "#FFFFFFCC",
+            size: "xs",
+            wrap: true,
+          },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        spacing: "sm",
+        contents: [
+          {
+            type: "text",
+            text: folderLine,
+            size: "xs",
+            color: TEXT_TAUPE,
+            wrap: true,
+          },
+          {
+            type: "separator",
+            margin: "sm",
+            color: BORDER_BEIGE,
+          },
+          ...shown.map((file) => ({
+            type: "box" as const,
+            layout: "baseline" as const,
+            spacing: "sm" as const,
+            contents: [
+              {
+                type: "text" as const,
+                text: "•",
+                color: BRAND_MAUVE,
+                size: "sm" as const,
+                flex: 0,
+              },
+              {
+                type: "text" as const,
+                text: file.filename,
+                color: TEXT_DARK_WARM,
+                size: "sm" as const,
+                weight: "bold" as const,
+                flex: 1,
+                wrap: true,
+              },
+            ],
+          })),
+          ...(hiddenCount > 0
+            ? [
+                {
+                  type: "text" as const,
+                  text: `+ อีก ${hiddenCount} ไฟล์ / ${hiddenCount} more files`,
+                  color: TEXT_TAUPE,
+                  size: "xs" as const,
+                  margin: "sm" as const,
+                  wrap: true,
+                },
+              ]
+            : []),
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        paddingTop: "0px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: BRAND_MAUVE,
+            height: "sm",
+            action: {
+              type: "uri",
+              label: "เปิดทั้งหมด / Open files",
+              uri: opts.liffUrl,
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
 export function helpBubble(liffUrl: string): LineFlexMessage {
   return {
     type: "flex",
