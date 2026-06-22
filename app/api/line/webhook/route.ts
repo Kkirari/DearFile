@@ -36,10 +36,12 @@ import {
   pushMessage,
   replyMessage,
   summaryBubble,
+  uploadBatchSuccessBubble,
   uploadSuccessBubble,
   verifyLineSignature,
   welcomeBubble,
   type LineMessage,
+  type UploadSuccessOpts,
 } from "@/lib/line";
 import {
   BUCKET,
@@ -61,7 +63,11 @@ import {
 import { askDearFile, type AskScope } from "@/lib/ask";
 import { buildDailySummary } from "@/lib/summary";
 import { ingestLink, ingestNote, processCapture } from "@/lib/capture";
-import { transcribeAudio, transcriptionEnabled, transcriptionMaxBytes } from "@/lib/transcribe";
+import {
+  transcribeAudio,
+  transcriptionEnabled,
+  transcriptionMaxBytes,
+} from "@/lib/transcribe";
 import { checkAndIncrementAsk } from "@/lib/rate-limit";
 import { routeIntent } from "@/lib/intent";
 import { invalidatePreviews } from "@/lib/previews-cache";
@@ -81,11 +87,24 @@ export const maxDuration = 60;
 // ── Allow-lists / limits ──────────────────────────────────────────────────
 
 const ALLOWED_EXTENSIONS = new Set([
-  "pdf",  "txt",
-  "jpg",  "jpeg", "png", "gif", "webp", "heic",
-  "mp4",  "mov",  "mp3", "m4a",
-  "xlsx", "xls",  "docx", "doc",
-  "zip",  "rar",
+  "pdf",
+  "txt",
+  "jpg",
+  "jpeg",
+  "png",
+  "gif",
+  "webp",
+  "heic",
+  "mp4",
+  "mov",
+  "mp3",
+  "m4a",
+  "xlsx",
+  "xls",
+  "docx",
+  "doc",
+  "zip",
+  "rar",
 ]);
 
 // Analyzer only handles these — others get uploaded raw without rename.
@@ -160,17 +179,22 @@ function isPreconditionFailed(err: unknown): boolean {
  */
 async function claimWebhookEvent(eventId: string): Promise<boolean> {
   try {
-    await s3.send(new PutObjectCommand({
-      Bucket:       BUCKET,
-      Key:          `webhook-seen/${eventId}.json`,
-      Body:         JSON.stringify({ at: new Date().toISOString() }),
-      ContentType:  "application/json",
-      IfNoneMatch:  "*",
-    }));
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: `webhook-seen/${eventId}.json`,
+        Body: JSON.stringify({ at: new Date().toISOString() }),
+        ContentType: "application/json",
+        IfNoneMatch: "*",
+      }),
+    );
     return true;
   } catch (err) {
     if (isPreconditionFailed(err)) return false;
-    console.warn("[line/webhook] dedupe marker write failed, failing open:", err);
+    console.warn(
+      "[line/webhook] dedupe marker write failed, failing open:",
+      err,
+    );
     return true;
   }
 }
@@ -212,31 +236,35 @@ async function shouldSkipEvent(event: LineEvent): Promise<boolean> {
  * key) and optionally `ws` (workspace id) to deep-link straight to that file —
  * LIFF forwards the query to the endpoint, where home-screen.tsx reads it.
  */
-function liffUrl(params?: { file?: string; ws?: string; tab?: string }): string {
+function liffUrl(params?: {
+  file?: string;
+  ws?: string;
+  tab?: string;
+}): string {
   const id = process.env.NEXT_PUBLIC_LIFF_ID;
   const base = id ? `https://liff.line.me/${id}` : "https://line.me";
   if (!params?.file && !params?.ws && !params?.tab) return base;
   const qs = new URLSearchParams();
   if (params.file) qs.set("file", params.file);
-  if (params.ws)   qs.set("ws", params.ws);
-  if (params.tab)  qs.set("tab", params.tab);
+  if (params.ws) qs.set("ws", params.ws);
+  if (params.tab) qs.set("tab", params.tab);
   return `${base}?${qs.toString()}`;
 }
 
 function extFromContentType(contentType: string): string | null {
   const ct = contentType.split(";")[0].trim().toLowerCase();
   const map: Record<string, string> = {
-    "image/jpeg":      "jpg",
-    "image/png":       "png",
-    "image/gif":       "gif",
-    "image/webp":      "webp",
-    "image/heic":      "heic",
-    "video/mp4":       "mp4",
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/gif": "gif",
+    "image/webp": "webp",
+    "image/heic": "heic",
+    "video/mp4": "mp4",
     "video/quicktime": "mov",
-    "audio/mpeg":      "mp3",
-    "audio/mp4":       "m4a",
-    "audio/x-m4a":     "m4a",
-    "audio/aac":       "m4a",
+    "audio/mpeg": "mp3",
+    "audio/mp4": "m4a",
+    "audio/x-m4a": "m4a",
+    "audio/aac": "m4a",
     "application/pdf": "pdf",
   };
   return map[ct] ?? null;
@@ -247,11 +275,16 @@ function deriveFilename(msg: LineMessageContent, contentType: string): string {
     const clean = msg.fileName.replace(/[\\/]/g, "_").replace(/\.\.+/g, ".");
     return clean.slice(0, 200);
   }
-  const ext = extFromContentType(contentType) ?? ({
-    image: "jpg",
-    video: "mp4",
-    audio: "m4a",
-  } as const)[msg.type as "image" | "video" | "audio"] ?? "bin";
+  const ext =
+    extFromContentType(contentType) ??
+    (
+      {
+        image: "jpg",
+        video: "mp4",
+        audio: "m4a",
+      } as const
+    )[msg.type as "image" | "video" | "audio"] ??
+    "bin";
   return `${msg.type}_${Date.now()}.${ext}`;
 }
 
@@ -266,34 +299,59 @@ function getSourceContext(event: LineEvent): {
 } {
   const src = event.source;
   return {
-    userId:  src?.userId ?? null,
+    userId: src?.userId ?? null,
     groupId: src?.type === "group" ? (src.groupId ?? null) : null,
     isGroup: src?.type === "group" || src?.type === "room",
   };
 }
 
-// ── Personal-storage upload (DM flow, unchanged) ──────────────────────────
+// ── Personal-storage upload (DM flow) ─────────────────────────────────────
 
-async function handlePersonalFileMessage(
+type FileUploadOutcome =
+  | { ok: true; upload: UploadSuccessOpts }
+  | { ok: false; message: LineMessage };
+
+function uploadOutcomeToMessages(outcome: FileUploadOutcome): LineMessage[] {
+  return outcome.ok ? [uploadSuccessBubble(outcome.upload)] : [outcome.message];
+}
+
+async function savePersonalFileMessage(
   userId: string,
   msg: LineMessageContent,
-): Promise<LineMessage[]> {
+): Promise<FileUploadOutcome> {
   const content = await fetchLineContent(msg.id);
 
   if (content.buffer.length > MAX_UPLOAD_BYTES) {
-    return [{ type: "text", text: "⚠️ ไฟล์ใหญ่เกิน 25MB / File exceeds 25MB" }];
+    return {
+      ok: false,
+      message: {
+        type: "text",
+        text: "⚠️ ไฟล์ใหญ่เกิน 25MB / File exceeds 25MB",
+      },
+    };
   }
 
   const filename = deriveFilename(msg, content.contentType);
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   if (!ALLOWED_EXTENSIONS.has(ext)) {
-    return [{ type: "text", text: `❌ ไม่รองรับ .${ext} / Unsupported .${ext}` }];
+    return {
+      ok: false,
+      message: {
+        type: "text",
+        text: `❌ ไม่รองรับ .${ext} / Unsupported .${ext}`,
+      },
+    };
   }
 
   const initialKey = `${userUploadsPrefix(userId)}${Date.now()}-${filename}`;
-  await s3.send(new PutObjectCommand({
-    Bucket: BUCKET, Key: initialKey, Body: content.buffer, ContentType: content.contentType,
-  }));
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: initialKey,
+      Body: content.buffer,
+      ContentType: content.contentType,
+    }),
+  );
 
   let finalKey = initialKey;
   let finalFilename = filename;
@@ -306,7 +364,10 @@ async function handlePersonalFileMessage(
 
       if (analysis.via !== "fallback") {
         try {
-          finalKey = await renameS3Object(initialKey, analysis.suggested_filename);
+          finalKey = await renameS3Object(
+            initialKey,
+            analysis.suggested_filename,
+          );
           finalFilename = analysis.suggested_filename;
         } catch (renameErr) {
           console.warn("[line/webhook] rename failed:", renameErr);
@@ -315,33 +376,36 @@ async function handlePersonalFileMessage(
 
       try {
         await setS3ObjectTags(finalKey, {
-          df_category:     analysis.category,
-          df_type:         analysis.type,
-          df_date:         analysis.date ?? "",
+          df_category: analysis.category,
+          df_type: analysis.type,
+          df_date: analysis.date ?? "",
           df_ai_folder_id: aiFolderId,
-          df_via:          analysis.via,
-          df_analyzed:     "1",
+          df_via: analysis.via,
+          df_analyzed: "1",
         });
       } catch (tagErr) {
         console.warn("[line/webhook] tagging failed:", tagErr);
       }
 
       try {
-        const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: finalKey }));
+        const head = await s3.send(
+          new HeadObjectCommand({ Bucket: BUCKET, Key: finalKey }),
+        );
         await upsertEntry(userId, {
-          key:            finalKey,
-          filename:       finalFilename,
-          category:       analysis.category,
-          type:           analysis.type,
-          subject:        analysis.subject,
-          detail:         analysis.detail,
-          date:           analysis.date,
-          keywords:       analysis.keywords,
-          ai_folder_id:   aiFolderId,
+          key: finalKey,
+          filename: finalFilename,
+          category: analysis.category,
+          type: analysis.type,
+          subject: analysis.subject,
+          detail: analysis.detail,
+          date: analysis.date,
+          keywords: analysis.keywords,
+          ai_folder_id: aiFolderId,
           user_folder_id: null,
-          size:           head.ContentLength ?? content.buffer.length,
-          mimeType:       head.ContentType ?? mimeFromFilename(finalFilename),
-          createdAt:      head.LastModified?.toISOString() ?? new Date().toISOString(),
+          size: head.ContentLength ?? content.buffer.length,
+          mimeType: head.ContentType ?? mimeFromFilename(finalFilename),
+          createdAt:
+            head.LastModified?.toISOString() ?? new Date().toISOString(),
         });
       } catch (idxErr) {
         console.warn("[line/webhook] index update failed:", idxErr);
@@ -353,38 +417,63 @@ async function handlePersonalFileMessage(
 
   invalidatePreviews(userId);
 
-  return [
-    uploadSuccessBubble({
-      filename:   finalFilename,
+  return {
+    ok: true,
+    upload: {
+      filename: finalFilename,
       folderName: aiFolderName(aiFolderId),
-      liffUrl:    liffUrl({ file: finalKey }),
-    }),
-  ];
+      liffUrl: liffUrl({ file: finalKey }),
+    },
+  };
+}
+
+async function handlePersonalFileMessage(
+  userId: string,
+  msg: LineMessageContent,
+): Promise<LineMessage[]> {
+  return uploadOutcomeToMessages(await savePersonalFileMessage(userId, msg));
 }
 
 // ── Workspace upload (group flow) ─────────────────────────────────────────
 
-async function handleWorkspaceFileMessage(
+async function saveWorkspaceFileMessage(
   workspace: WorkspaceMeta,
   uploaderId: string,
   msg: LineMessageContent,
-): Promise<LineMessage[]> {
+): Promise<FileUploadOutcome> {
   const content = await fetchLineContent(msg.id);
 
   if (content.buffer.length > MAX_UPLOAD_BYTES) {
-    return [{ type: "text", text: "⚠️ ไฟล์ใหญ่เกิน 25MB / File exceeds 25MB" }];
+    return {
+      ok: false,
+      message: {
+        type: "text",
+        text: "⚠️ ไฟล์ใหญ่เกิน 25MB / File exceeds 25MB",
+      },
+    };
   }
 
   const filename = deriveFilename(msg, content.contentType);
   const ext = filename.split(".").pop()?.toLowerCase() ?? "";
   if (!ALLOWED_EXTENSIONS.has(ext)) {
-    return [{ type: "text", text: `❌ ไม่รองรับ .${ext} / Unsupported .${ext}` }];
+    return {
+      ok: false,
+      message: {
+        type: "text",
+        text: `❌ ไม่รองรับ .${ext} / Unsupported .${ext}`,
+      },
+    };
   }
 
   const initialKey = `${workspaceInboxPrefix(workspace.id)}${Date.now()}-${filename}`;
-  await s3.send(new PutObjectCommand({
-    Bucket: BUCKET, Key: initialKey, Body: content.buffer, ContentType: content.contentType,
-  }));
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: initialKey,
+      Body: content.buffer,
+      ContentType: content.contentType,
+    }),
+  );
 
   let finalKey = initialKey;
   let finalFilename = filename;
@@ -397,7 +486,10 @@ async function handleWorkspaceFileMessage(
 
       if (analysis.via !== "fallback") {
         try {
-          finalKey = await renameS3Object(initialKey, analysis.suggested_filename);
+          finalKey = await renameS3Object(
+            initialKey,
+            analysis.suggested_filename,
+          );
           finalFilename = analysis.suggested_filename;
         } catch (renameErr) {
           console.warn("[line/webhook] rename failed:", renameErr);
@@ -406,35 +498,38 @@ async function handleWorkspaceFileMessage(
 
       try {
         await setS3ObjectTags(finalKey, {
-          df_category:     analysis.category,
-          df_type:         analysis.type,
-          df_date:         analysis.date ?? "",
+          df_category: analysis.category,
+          df_type: analysis.type,
+          df_date: analysis.date ?? "",
           df_ai_folder_id: aiFolderId,
-          df_via:          analysis.via,
-          df_analyzed:     "1",
-          df_uploader:     uploaderId,
-          df_workspace:    workspace.id,
+          df_via: analysis.via,
+          df_analyzed: "1",
+          df_uploader: uploaderId,
+          df_workspace: workspace.id,
         });
       } catch (tagErr) {
         console.warn("[line/webhook] tagging failed:", tagErr);
       }
 
       try {
-        const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: finalKey }));
+        const head = await s3.send(
+          new HeadObjectCommand({ Bucket: BUCKET, Key: finalKey }),
+        );
         await upsertWorkspaceEntry(workspace.id, {
-          key:            finalKey,
-          filename:       finalFilename,
-          category:       analysis.category,
-          type:           analysis.type,
-          subject:        analysis.subject,
-          detail:         analysis.detail,
-          date:           analysis.date,
-          keywords:       analysis.keywords,
-          ai_folder_id:   aiFolderId,
+          key: finalKey,
+          filename: finalFilename,
+          category: analysis.category,
+          type: analysis.type,
+          subject: analysis.subject,
+          detail: analysis.detail,
+          date: analysis.date,
+          keywords: analysis.keywords,
+          ai_folder_id: aiFolderId,
           user_folder_id: null,
-          size:           head.ContentLength ?? content.buffer.length,
-          mimeType:       head.ContentType ?? mimeFromFilename(finalFilename),
-          createdAt:      head.LastModified?.toISOString() ?? new Date().toISOString(),
+          size: head.ContentLength ?? content.buffer.length,
+          mimeType: head.ContentType ?? mimeFromFilename(finalFilename),
+          createdAt:
+            head.LastModified?.toISOString() ?? new Date().toISOString(),
           uploaderId,
         });
       } catch (idxErr) {
@@ -445,14 +540,25 @@ async function handleWorkspaceFileMessage(
     }
   }
 
-  return [
-    uploadSuccessBubble({
-      filename:      finalFilename,
-      folderName:    aiFolderName(aiFolderId),
-      liffUrl:       liffUrl({ file: finalKey, ws: workspace.id }),
+  return {
+    ok: true,
+    upload: {
+      filename: finalFilename,
+      folderName: aiFolderName(aiFolderId),
+      liffUrl: liffUrl({ file: finalKey, ws: workspace.id }),
       workspaceName: workspace.name,
-    }),
-  ];
+    },
+  };
+}
+
+async function handleWorkspaceFileMessage(
+  workspace: WorkspaceMeta,
+  uploaderId: string,
+  msg: LineMessageContent,
+): Promise<LineMessage[]> {
+  return uploadOutcomeToMessages(
+    await saveWorkspaceFileMessage(workspace, uploaderId, msg),
+  );
 }
 
 // ── /folder command (group, owner only) ───────────────────────────────────
@@ -470,12 +576,14 @@ async function handleFolderCommand(
     (m) => m.userId === uploaderId && m.role === "owner",
   );
   if (!isOwner) {
-    return [{
-      type: "text",
-      text:
-        "🔒 เฉพาะเจ้าของพื้นที่เท่านั้นที่สร้างโฟลเดอร์ได้\n" +
-        "Only the workspace owner can create folders.",
-    }];
+    return [
+      {
+        type: "text",
+        text:
+          "🔒 เฉพาะเจ้าของพื้นที่เท่านั้นที่สร้างโฟลเดอร์ได้\n" +
+          "Only the workspace owner can create folders.",
+      },
+    ];
   }
 
   const name = match[1].trim().slice(0, 80);
@@ -483,19 +591,29 @@ async function handleFolderCommand(
 
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
-  await s3.send(new PutObjectCommand({
-    Bucket:      BUCKET,
-    Key:         workspaceFolderMetaKey(workspace.id, id),
-    Body:        JSON.stringify({ id, name, owner: "user", createdAt, createdBy: uploaderId }),
-    ContentType: "application/json",
-  }));
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: workspaceFolderMetaKey(workspace.id, id),
+      Body: JSON.stringify({
+        id,
+        name,
+        owner: "user",
+        createdAt,
+        createdBy: uploaderId,
+      }),
+      ContentType: "application/json",
+    }),
+  );
 
-  return [{
-    type: "text",
-    text:
-      `✅ สร้างโฟลเดอร์ "${name}" ใน ${workspace.name}\n` +
-      `Created folder "${name}" in ${workspace.name}.`,
-  }];
+  return [
+    {
+      type: "text",
+      text:
+        `✅ สร้างโฟลเดอร์ "${name}" ใน ${workspace.name}\n` +
+        `Created folder "${name}" in ${workspace.name}.`,
+    },
+  ];
 }
 
 // ── Ask DearFile (chat retrieval) ─────────────────────────────────────────
@@ -519,7 +637,8 @@ function parseAskCommand(text: string): string | null {
     const rest = t.slice(sigil.length).trimStart();
     const lower = rest.toLowerCase();
     for (const trig of ASK_TRIGGERS) {
-      if (lower.startsWith(trig.toLowerCase())) return rest.slice(trig.length).trim();
+      if (lower.startsWith(trig.toLowerCase()))
+        return rest.slice(trig.length).trim();
     }
   }
   return null;
@@ -533,7 +652,11 @@ function parseAskCommand(text: string): string | null {
 const SUMMARY_COMMANDS = new Set(["summary", "recap", "สรุป", "สรุปวันนี้"]);
 
 function isSummaryCommand(text: string): boolean {
-  const t = (text ?? "").trim().toLowerCase().replace(/^[/!@]/, "").trim();
+  const t = (text ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/^[/!@]/, "")
+    .trim();
   return SUMMARY_COMMANDS.has(t);
 }
 
@@ -546,31 +669,37 @@ async function handleSummaryCommand(userId: string): Promise<LineMessage[]> {
   try {
     const summary = await buildDailySummary(userId);
     if (!summary) {
-      return [{
-        type: "text",
-        text:
-          "📭 วันนี้ยังไม่มีไฟล์ที่บันทึกไว้ ลองส่งไฟล์มาได้เลย\n" +
-          "Nothing saved yet today — send me a file to get started.",
-      }];
+      return [
+        {
+          type: "text",
+          text:
+            "📭 วันนี้ยังไม่มีไฟล์ที่บันทึกไว้ ลองส่งไฟล์มาได้เลย\n" +
+            "Nothing saved yet today — send me a file to get started.",
+        },
+      ];
     }
-    return [summaryBubble(
-      {
-        date:       summary.date,
-        count:      summary.count,
-        text:       summary.text,
-        highlights: summary.highlights,
-      },
-      (e) => liffUrl({ file: e.key }),
-      liffUrl(),
-    )];
+    return [
+      summaryBubble(
+        {
+          date: summary.date,
+          count: summary.count,
+          text: summary.text,
+          highlights: summary.highlights,
+        },
+        (e) => liffUrl({ file: e.key }),
+        liffUrl(),
+      ),
+    ];
   } catch (err) {
     console.error("[line/webhook] summary command failed:", err);
-    return [{
-      type: "text",
-      text:
-        "⚠️ สรุปไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
-        "Couldn't build your summary right now — please try again.",
-    }];
+    return [
+      {
+        type: "text",
+        text:
+          "⚠️ สรุปไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
+          "Couldn't build your summary right now — please try again.",
+      },
+    ];
   }
 }
 
@@ -618,12 +747,14 @@ async function handleVoiceNote(
   replyToken: string | undefined,
 ): Promise<LineMessage[] | null> {
   if (!transcriptionEnabled()) {
-    return [{
-      type: "text",
-      text:
-        "🎙️ ฟังเสียงยังไม่พร้อม ลองพิมพ์ข้อความแทนได้นะ\n" +
-        "Voice transcription isn't set up yet — please type your note instead.",
-    }];
+    return [
+      {
+        type: "text",
+        text:
+          "🎙️ ฟังเสียงยังไม่พร้อม ลองพิมพ์ข้อความแทนได้นะ\n" +
+          "Voice transcription isn't set up yet — please type your note instead.",
+      },
+    ];
   }
 
   let content: { buffer: Buffer; contentType: string };
@@ -631,48 +762,60 @@ async function handleVoiceNote(
     content = await fetchLineContent(msg.id);
   } catch (err) {
     console.error("[line/webhook] voice fetch failed:", err);
-    return [{
-      type: "text",
-      text:
-        "⚠️ โหลดเสียงไม่ได้ ลองส่งใหม่อีกครั้งนะ\n" +
-        "Couldn't fetch the audio — please try again.",
-    }];
+    return [
+      {
+        type: "text",
+        text:
+          "⚠️ โหลดเสียงไม่ได้ ลองส่งใหม่อีกครั้งนะ\n" +
+          "Couldn't fetch the audio — please try again.",
+      },
+    ];
   }
 
   if (content.buffer.byteLength > transcriptionMaxBytes()) {
-    return [{
-      type: "text",
-      text:
-        "🎙️ คลิปเสียงยาวเกินไป ลองตัดให้สั้นลงนะ\n" +
-        "Voice clip is too long — please trim it and resend.",
-    }];
+    return [
+      {
+        type: "text",
+        text:
+          "🎙️ คลิปเสียงยาวเกินไป ลองตัดให้สั้นลงนะ\n" +
+          "Voice clip is too long — please trim it and resend.",
+      },
+    ];
   }
 
   after(async () => {
     try {
       let transcript: string;
       try {
-        transcript = await transcribeAudio(content.buffer, content.contentType, { languageHint: "th" });
+        transcript = await transcribeAudio(
+          content.buffer,
+          content.contentType,
+          { languageHint: "th" },
+        );
       } catch (err) {
         console.error("[line/webhook] transcription failed:", err);
-        await pushMessage(userId, [{
-          type: "text",
-          text:
-            "⚠️ ถอดเสียงไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
-            "Couldn't transcribe right now — please try again.",
-        }]);
+        await pushMessage(userId, [
+          {
+            type: "text",
+            text:
+              "⚠️ ถอดเสียงไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
+              "Couldn't transcribe right now — please try again.",
+          },
+        ]);
         return;
       }
 
       // Whisper-family models can return tiny filler ("…", " ") on near-silent
       // input. Anything below 2 chars after trim is unusable.
       if (transcript.replace(/[\s.,!?…]/g, "").length < 2) {
-        await pushMessage(userId, [{
-          type: "text",
-          text:
-            "🎙️ ฟังไม่ออก ลองอัดในที่เงียบกว่านี้นะ\n" +
-            "Couldn't make out the audio — try recording somewhere quieter.",
-        }]);
+        await pushMessage(userId, [
+          {
+            type: "text",
+            text:
+              "🎙️ ฟังไม่ออก ลองอัดในที่เงียบกว่านี้นะ\n" +
+              "Couldn't make out the audio — try recording somewhere quieter.",
+          },
+        ]);
         return;
       }
 
@@ -681,12 +824,14 @@ async function handleVoiceNote(
         id = await ingestNote(userId, transcript);
       } catch (err) {
         console.error("[line/webhook] voice-note ingest failed:", err);
-        await pushMessage(userId, [{
-          type: "text",
-          text:
-            "⚠️ บันทึกไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
-            "Couldn't save the note — please try again.",
-        }]);
+        await pushMessage(userId, [
+          {
+            type: "text",
+            text:
+              "⚠️ บันทึกไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
+              "Couldn't save the note — please try again.",
+          },
+        ]);
         return;
       }
 
@@ -717,11 +862,11 @@ function deliverCaptureInBackground(
       if (!item) return;
       const bubble = captureResultBubble(
         {
-          type:      item.type,
-          title:     item.title,
-          summary:   item.summary,
+          type: item.type,
+          title: item.title,
+          summary: item.summary,
           sourceUrl: item.sourceUrl,
-          tags:      item.tags,
+          tags: item.tags,
         },
         liffUrl({ tab: "timeline" }),
       );
@@ -750,12 +895,14 @@ async function handleAskMessage(
 ): Promise<LineMessage[]> {
   const { allowed } = await checkAndIncrementAsk(userId);
   if (!allowed) {
-    return [{
-      type: "text",
-      text:
-        "📊 วันนี้ถามครบจำนวนแล้ว ลองใหม่พรุ่งนี้นะ\n" +
-        "You've reached today's question limit — try again tomorrow.",
-    }];
+    return [
+      {
+        type: "text",
+        text:
+          "📊 วันนี้ถามครบจำนวนแล้ว ลองใหม่พรุ่งนี้นะ\n" +
+          "You've reached today's question limit — try again tomorrow.",
+      },
+    ];
   }
 
   try {
@@ -763,28 +910,39 @@ async function handleAskMessage(
     const wsId = scope.kind === "workspace" ? scope.workspaceId : undefined;
     const rows = citations.map((c) =>
       c.kind === "file"
-        ? { icon: "📄", label: c.entry.filename, uri: liffUrl({ file: c.entry.key, ws: wsId }) }
+        ? {
+            icon: "📄",
+            label: c.entry.filename,
+            uri: liffUrl({ file: c.entry.key, ws: wsId }),
+          }
         : {
             icon: c.itemType === "link" ? "🔗" : "📝",
             label: c.title,
-            uri: c.itemType === "link" && c.sourceUrl ? c.sourceUrl : liffUrl({ tab: "timeline" }),
+            uri:
+              c.itemType === "link" && c.sourceUrl
+                ? c.sourceUrl
+                : liffUrl({ tab: "timeline" }),
           },
     );
     return [answerBubble(answer, rows)];
   } catch (err) {
     console.error("[line/webhook] ask failed:", err);
-    return [{
-      type: "text",
-      text:
-        "⚠️ ตอบไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
-        "Couldn't answer right now — please try again.",
-    }];
+    return [
+      {
+        type: "text",
+        text:
+          "⚠️ ตอบไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\n" +
+          "Couldn't answer right now — please try again.",
+      },
+    ];
   }
 }
 
 // ── Event dispatch ────────────────────────────────────────────────────────
 
-async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | null> {
+async function handleMessageEvent(
+  event: LineEvent,
+): Promise<LineMessage[] | null> {
   const msg = event.message;
   if (!msg) return null;
 
@@ -793,13 +951,18 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
   // Sender must be identifiable. In DM source.userId is always present; in
   // groups it's present only when the sender has friended the bot.
   if (!userId) {
-    if (isGroup && (msg.type === "image" || msg.type === "video" || msg.type === "file")) {
-      return [{
-        type: "text",
-        text:
-          "👋 เพิ่ม DearFile เป็นเพื่อนก่อน เพื่อบันทึกไฟล์จากกลุ่ม\n" +
-          "Add DearFile as a friend first to save files from group chats.",
-      }];
+    if (
+      isGroup &&
+      (msg.type === "image" || msg.type === "video" || msg.type === "file")
+    ) {
+      return [
+        {
+          type: "text",
+          text:
+            "👋 เพิ่ม DearFile เป็นเพื่อนก่อน เพื่อบันทึกไฟล์จากกลุ่ม\n" +
+            "Add DearFile as a friend first to save files from group chats.",
+        },
+      ];
     }
     return null;
   }
@@ -814,8 +977,8 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
       const summary = await fetchGroupSummary(groupId);
       workspace = await createGroupWorkspace({
         lineGroupId: groupId,
-        ownerId:     userId,
-        name:        summary?.groupName,
+        ownerId: userId,
+        name: summary?.groupName,
       });
     } else if (!workspace.members.some((m) => m.userId === userId)) {
       // Auto-add as member on first upload
@@ -823,12 +986,14 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
     }
 
     if (workspace.orphaned) {
-      return [{
-        type: "text",
-        text:
-          "ℹ️ พื้นที่นี้ถูกตัดจากกลุ่มแล้ว เปิด DearFile เพื่อดูไฟล์ที่บันทึกไว้\n" +
-          "This workspace is no longer linked to a group. Open DearFile to view saved files.",
-      }];
+      return [
+        {
+          type: "text",
+          text:
+            "ℹ️ พื้นที่นี้ถูกตัดจากกลุ่มแล้ว เปิด DearFile เพื่อดูไฟล์ที่บันทึกไว้\n" +
+            "This workspace is no longer linked to a group. Open DearFile to view saved files.",
+        },
+      ];
     }
 
     if (msg.type === "text") {
@@ -863,12 +1028,14 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
       if (question === null) return null;
       if (question.length === 0) {
         // Bare trigger with no question — confirm we're listening + show how.
-        return [{
-          type: "text",
-          text:
-            '🦌 พิมพ์คำถามต่อท้ายได้เลย เช่น "/น้องกวาง หาใบเสร็จเดือนที่แล้ว"\n' +
-            'Add your question after the trigger, e.g. "/dearfile find last month\'s receipt".',
-        }];
+        return [
+          {
+            type: "text",
+            text:
+              '🦌 พิมพ์คำถามต่อท้ายได้เลย เช่น "/น้องกวาง หาใบเสร็จเดือนที่แล้ว"\n' +
+              'Add your question after the trigger, e.g. "/dearfile find last month\'s receipt".',
+          },
+        ];
       }
       return handleAskMessage(
         { kind: "workspace", workspaceId: workspace.id },
@@ -877,7 +1044,12 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
       );
     }
 
-    if (msg.type === "image" || msg.type === "video" || msg.type === "audio" || msg.type === "file") {
+    if (
+      msg.type === "image" ||
+      msg.type === "video" ||
+      msg.type === "audio" ||
+      msg.type === "file"
+    ) {
       try {
         return await handleWorkspaceFileMessage(workspace, userId, msg);
       } catch (err) {
@@ -921,15 +1093,18 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
     if (cap) {
       let id: string;
       try {
-        id = cap.kind === "link"
-          ? await ingestLink(userId, cap.url)
-          : await ingestNote(userId, cap.text);
+        id =
+          cap.kind === "link"
+            ? await ingestLink(userId, cap.url)
+            : await ingestNote(userId, cap.text);
       } catch (err) {
         console.error("[line/webhook] capture ingest failed:", err);
-        return [{
-          type: "text",
-          text: "⚠️ บันทึกไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\nCouldn't save that right now — please try again.",
-        }];
+        return [
+          {
+            type: "text",
+            text: "⚠️ บันทึกไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\nCouldn't save that right now — please try again.",
+          },
+        ];
       }
       deliverCaptureInBackground(id, userId, event.replyToken);
       return null;
@@ -946,7 +1121,9 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
     // router. Otherwise let the Hybrid Intent Router decide so greetings /
     // help / noise don't pay for the Ask pipeline, and plain "notes to self"
     // are auto-saved to the Timeline (ask-biased — questions are never saved).
-    const intent = hadPrefix ? "ask" : (await routeIntent(question, userId)).intent;
+    const intent = hadPrefix
+      ? "ask"
+      : (await routeIntent(question, userId)).intent;
     switch (intent) {
       case "note": {
         // Smart auto-save: the router judged this a note → capture it like /note.
@@ -955,10 +1132,12 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
           id = await ingestNote(userId, question);
         } catch (err) {
           console.error("[line/webhook] note ingest failed:", err);
-          return [{
-            type: "text",
-            text: "⚠️ บันทึกไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\nCouldn't save that right now — please try again.",
-          }];
+          return [
+            {
+              type: "text",
+              text: "⚠️ บันทึกไม่ได้ตอนนี้ ลองใหม่อีกครั้งนะ\nCouldn't save that right now — please try again.",
+            },
+          ];
         }
         deliverCaptureInBackground(id, userId, event.replyToken);
         return null;
@@ -980,6 +1159,149 @@ async function handleMessageEvent(event: LineEvent): Promise<LineMessage[] | nul
   }
 
   return null;
+}
+
+function isFileUploadEvent(event: LineEvent): boolean {
+  if (event.type !== "message" || !event.replyToken || !event.message)
+    return false;
+  const { userId, isGroup } = getSourceContext(event);
+  if (!userId) return false;
+  const type = event.message.type;
+  if (isGroup)
+    return (
+      type === "image" ||
+      type === "video" ||
+      type === "audio" ||
+      type === "file"
+    );
+  return type === "image" || type === "video" || type === "file";
+}
+
+function batchKey(event: LineEvent): string | null {
+  const { userId, groupId, isGroup } = getSourceContext(event);
+  if (!userId) return null;
+  return isGroup && groupId ? `group:${groupId}:${userId}` : `dm:${userId}`;
+}
+
+async function workspaceForBatch(
+  groupId: string,
+  userId: string,
+): Promise<WorkspaceMeta> {
+  let workspace = await findWorkspaceByLineGroup(groupId);
+  if (!workspace) {
+    const summary = await fetchGroupSummary(groupId);
+    workspace = await createGroupWorkspace({
+      lineGroupId: groupId,
+      ownerId: userId,
+      name: summary?.groupName,
+    });
+  } else if (!workspace.members.some((m) => m.userId === userId)) {
+    workspace = await addMember(workspace.id, userId, "member");
+  }
+  return workspace;
+}
+
+async function handleBatchedFileUploads(
+  events: LineEvent[],
+  handledIndexes: Set<number>,
+): Promise<void> {
+  const groups = new Map<string, { index: number; event: LineEvent }[]>();
+
+  events.forEach((event, index) => {
+    if (!isFileUploadEvent(event)) return;
+    const key = batchKey(event);
+    if (!key) return;
+    const group = groups.get(key) ?? [];
+    group.push({ index, event });
+    groups.set(key, group);
+  });
+
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+
+    const claimed: { index: number; event: LineEvent }[] = [];
+    for (const item of group) {
+      handledIndexes.add(item.index);
+      if (!(await shouldSkipEvent(item.event))) claimed.push(item);
+    }
+    if (claimed.length === 0) continue;
+
+    const first = claimed[0].event;
+    const firstMsg = first.message;
+    const replyToken = first.replyToken;
+    if (!firstMsg || !replyToken) continue;
+
+    const { userId, groupId, isGroup } = getSourceContext(first);
+    if (!userId) continue;
+
+    try {
+      let outcomes: FileUploadOutcome[];
+      let workspace: WorkspaceMeta | null = null;
+
+      if (isGroup && groupId) {
+        workspace = await workspaceForBatch(groupId, userId);
+        if (workspace.orphaned) {
+          await replyMessage(replyToken, [
+            {
+              type: "text",
+              text:
+                "ℹ️ พื้นที่นี้ถูกตัดจากกลุ่มแล้ว เปิด DearFile เพื่อดูไฟล์ที่บันทึกไว้\n" +
+                "This workspace is no longer linked to a group. Open DearFile to view saved files.",
+            },
+          ]);
+          continue;
+        }
+        outcomes = await Promise.all(
+          claimed.map(({ event }) =>
+            saveWorkspaceFileMessage(workspace!, userId, event.message!),
+          ),
+        );
+      } else {
+        outcomes = await Promise.all(
+          claimed.map(({ event }) =>
+            savePersonalFileMessage(userId, event.message!),
+          ),
+        );
+      }
+
+      const uploads = outcomes.flatMap((outcome) =>
+        outcome.ok ? [outcome.upload] : [],
+      );
+      const errors = outcomes.flatMap((outcome) =>
+        outcome.ok ? [] : [outcome.message],
+      );
+      const response: LineMessage[] = [];
+
+      if (uploads.length > 1) {
+        response.push(
+          uploadBatchSuccessBubble({
+            files: uploads,
+            liffUrl: workspace
+              ? liffUrl({ ws: workspace.id, tab: "home" })
+              : liffUrl(),
+            workspaceName: workspace?.name,
+          }),
+        );
+      } else if (uploads.length === 1) {
+        response.push(uploadSuccessBubble(uploads[0]));
+      }
+
+      if (errors.length > 0) {
+        response.push({
+          type: "text",
+          text: `⚠️ ${errors.length} ไฟล์บันทึกไม่สำเร็จ / ${errors.length} file(s) failed`,
+        });
+      }
+
+      if (response.length > 0)
+        await replyMessage(replyToken, response.slice(0, 5));
+    } catch (err) {
+      console.error("[line/webhook] batched file upload failed:", err);
+      await replyMessage(replyToken, [
+        { type: "text", text: "⚠️ อัปโหลดไม่สำเร็จ / Upload failed" },
+      ]);
+    }
+  }
 }
 
 // ── POST handler ──────────────────────────────────────────────────────────
@@ -1006,16 +1328,23 @@ export async function POST(req: Request) {
     return new Response("OK", { status: 200 });
   }
 
+  const batchedEventIndexes = new Set<number>();
+  await handleBatchedFileUploads(events, batchedEventIndexes);
+
   await Promise.allSettled(
-    events.map(async (event) => {
+    events.map(async (event, index) => {
       try {
+        if (batchedEventIndexes.has(index)) return;
+
         // Drop retries / duplicates before doing any work. LINE will keep
         // re-delivering the same webhookEventId until it gets a 2xx, and
         // each run would otherwise stamp a fresh timestamp into the S3 key
         // producing duplicate files. The check is async because the
         // bottom layer hits S3 for cross-instance dedupe.
         if (await shouldSkipEvent(event)) {
-          console.log(`[line/webhook] skipping duplicate event ${event.webhookEventId ?? "(no id)"}`);
+          console.log(
+            `[line/webhook] skipping duplicate event ${event.webhookEventId ?? "(no id)"}`,
+          );
           return;
         }
 
@@ -1024,11 +1353,12 @@ export async function POST(req: Request) {
           await replyMessage(event.replyToken, [welcomeBubble(url)]);
           return;
         }
-        
+
         // postback → bot replies to the group with a formatted Flex bubble.
         // Used by bubbles 2 (examples) and 4 (kick hint) of the group welcome.
         if (event.type === "postback" && event.replyToken) {
-          const data = (event as { postback?: { data?: string } }).postback?.data ?? "";
+          const data =
+            (event as { postback?: { data?: string } }).postback?.data ?? "";
           let reply: LineMessage | null = null;
           if (data === "welcome:examples") {
             reply = examplesBubble(url);
@@ -1051,8 +1381,8 @@ export async function POST(req: Request) {
             const summary = await fetchGroupSummary(groupId);
             const ws = await createGroupWorkspace({
               lineGroupId: groupId,
-              ownerId:     userId,
-              name:        summary?.groupName,
+              ownerId: userId,
+              name: summary?.groupName,
             });
             // Re-join: if the workspace was previously orphaned (bot was
             // kicked or self-left via the kick command), clear the flag so
@@ -1064,7 +1394,9 @@ export async function POST(req: Request) {
             }
           }
           if (event.replyToken) {
-            await replyMessage(event.replyToken, [welcomeBubble(url, { forGroup: true })]);
+            await replyMessage(event.replyToken, [
+              welcomeBubble(url, { forGroup: true }),
+            ]);
           }
           return;
         }
