@@ -19,7 +19,13 @@
  *   https://<your-domain>/api/line/webhook
  */
 
-import { PutObjectCommand, HeadObjectCommand } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
 import { after } from "next/server";
 import {
   answerBubble,
@@ -109,6 +115,10 @@ const ALLOWED_EXTENSIONS = new Set([
 
 // Analyzer only handles these — others get uploaded raw without rename.
 const ANALYZER_EXTENSIONS = new Set(["jpg", "jpeg", "png", "pdf", "docx"]);
+
+// LINE sends multi-select media as separate webhook requests in production.
+// Queue saved uploads for a short quiet window, then push one confirmation.
+const UPLOAD_BATCH_DEBOUNCE_MS = 6000;
 
 // 25 MB cap. LINE allows larger uploads but Vercel function memory makes
 // big buffers risky. Bigger files should use the LIFF web uploader.
@@ -313,6 +323,167 @@ type FileUploadOutcome =
 
 function uploadOutcomeToMessages(outcome: FileUploadOutcome): LineMessage[] {
   return outcome.ok ? [uploadSuccessBubble(outcome.upload)] : [outcome.message];
+}
+
+type UploadBatchTarget =
+  | { kind: "user"; userId: string }
+  | {
+      kind: "workspace";
+      userId: string;
+      groupId: string;
+      workspaceId: string;
+      workspaceName: string;
+    };
+
+interface PendingUploadBatchItem {
+  upload: UploadSuccessOpts;
+  target: UploadBatchTarget;
+  createdAt: string;
+}
+
+function uploadBatchScopeKey(target: UploadBatchTarget): string {
+  const raw =
+    target.kind === "workspace"
+      ? `workspace:${target.workspaceId}:${target.userId}`
+      : `user:${target.userId}`;
+  return Buffer.from(raw).toString("base64url");
+}
+
+function pendingUploadPrefix(target: UploadBatchTarget): string {
+  return `line-upload-batches/${uploadBatchScopeKey(target)}/pending/`;
+}
+
+function pendingUploadKey(target: UploadBatchTarget, id: string): string {
+  return `${pendingUploadPrefix(target)}${id}.json`;
+}
+
+function uploadBatchLockKey(target: UploadBatchTarget): string {
+  return `line-upload-batches/${uploadBatchScopeKey(target)}/_flush-lock.json`;
+}
+
+async function readPendingUploadItem(
+  key: string,
+): Promise<PendingUploadBatchItem | null> {
+  try {
+    const res = await s3.send(
+      new GetObjectCommand({ Bucket: BUCKET, Key: key }),
+    );
+    const text = await res.Body?.transformToString();
+    if (!text) return null;
+    return JSON.parse(text) as PendingUploadBatchItem;
+  } catch (err) {
+    console.warn("[line/webhook] pending upload read failed:", err);
+    return null;
+  }
+}
+
+async function enqueueUploadConfirmation(
+  target: UploadBatchTarget,
+  upload: UploadSuccessOpts,
+  eventId: string,
+): Promise<void> {
+  const item: PendingUploadBatchItem = {
+    upload,
+    target,
+    createdAt: new Date().toISOString(),
+  };
+  const id = eventId || crypto.randomUUID();
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: BUCKET,
+      Key: pendingUploadKey(target, id),
+      Body: JSON.stringify(item),
+      ContentType: "application/json",
+    }),
+  );
+}
+
+function scheduleUploadConfirmationFlush(target: UploadBatchTarget): void {
+  after(async () => {
+    await new Promise((resolve) =>
+      setTimeout(resolve, UPLOAD_BATCH_DEBOUNCE_MS),
+    );
+    await flushUploadConfirmations(target);
+  });
+}
+
+async function flushUploadConfirmations(
+  target: UploadBatchTarget,
+): Promise<void> {
+  const lockKey = uploadBatchLockKey(target);
+  try {
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: lockKey,
+        Body: JSON.stringify({ at: new Date().toISOString() }),
+        ContentType: "application/json",
+        IfNoneMatch: "*",
+      }),
+    );
+  } catch (err) {
+    if (isPreconditionFailed(err)) return;
+    console.warn("[line/webhook] upload batch lock failed:", err);
+    return;
+  }
+
+  try {
+    const list = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: BUCKET,
+        Prefix: pendingUploadPrefix(target),
+      }),
+    );
+    const keys = (list.Contents ?? []).flatMap((obj) =>
+      obj.Key ? [obj.Key] : [],
+    );
+    if (keys.length === 0) return;
+
+    const items = (await Promise.all(keys.map(readPendingUploadItem)))
+      .filter((item): item is PendingUploadBatchItem => !!item)
+      .sort(
+        (a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+      );
+    if (items.length === 0) return;
+
+    const uploads = items.map((item) => item.upload);
+    const firstTarget = items[0].target;
+    const to =
+      firstTarget.kind === "workspace"
+        ? firstTarget.groupId
+        : firstTarget.userId;
+    const messages: LineMessage[] =
+      uploads.length > 1
+        ? [
+            uploadBatchSuccessBubble({
+              files: uploads,
+              liffUrl:
+                firstTarget.kind === "workspace"
+                  ? liffUrl({ ws: firstTarget.workspaceId, tab: "home" })
+                  : liffUrl(),
+              workspaceName:
+                firstTarget.kind === "workspace"
+                  ? firstTarget.workspaceName
+                  : undefined,
+            }),
+          ]
+        : [uploadSuccessBubble(uploads[0])];
+
+    await pushMessage(to, messages);
+
+    await Promise.allSettled(
+      keys.map((key) =>
+        s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key })),
+      ),
+    );
+  } catch (err) {
+    console.error("[line/webhook] upload batch flush failed:", err);
+  } finally {
+    await s3
+      .send(new DeleteObjectCommand({ Bucket: BUCKET, Key: lockKey }))
+      .catch(() => {});
+  }
 }
 
 async function savePersonalFileMessage(
@@ -1051,7 +1222,31 @@ async function handleMessageEvent(
       msg.type === "file"
     ) {
       try {
-        return await handleWorkspaceFileMessage(workspace, userId, msg);
+        const outcome = await saveWorkspaceFileMessage(workspace, userId, msg);
+        if (!outcome.ok) return [outcome.message];
+
+        const target: UploadBatchTarget = {
+          kind: "workspace",
+          userId,
+          groupId,
+          workspaceId: workspace.id,
+          workspaceName: workspace.name,
+        };
+        try {
+          await enqueueUploadConfirmation(
+            target,
+            outcome.upload,
+            event.webhookEventId ?? msg.id,
+          );
+          scheduleUploadConfirmationFlush(target);
+          return null;
+        } catch (queueErr) {
+          console.warn(
+            "[line/webhook] upload confirmation queue failed:",
+            queueErr,
+          );
+          return uploadOutcomeToMessages(outcome);
+        }
       } catch (err) {
         console.error("[line/webhook] workspace file upload failed:", err);
         return [{ type: "text", text: "⚠️ อัปโหลดไม่สำเร็จ / Upload failed" }];
@@ -1072,7 +1267,25 @@ async function handleMessageEvent(
 
   if (msg.type === "image" || msg.type === "video" || msg.type === "file") {
     try {
-      return await handlePersonalFileMessage(userId, msg);
+      const outcome = await savePersonalFileMessage(userId, msg);
+      if (!outcome.ok) return [outcome.message];
+
+      const target: UploadBatchTarget = { kind: "user", userId };
+      try {
+        await enqueueUploadConfirmation(
+          target,
+          outcome.upload,
+          event.webhookEventId ?? msg.id,
+        );
+        scheduleUploadConfirmationFlush(target);
+        return null;
+      } catch (queueErr) {
+        console.warn(
+          "[line/webhook] upload confirmation queue failed:",
+          queueErr,
+        );
+        return uploadOutcomeToMessages(outcome);
+      }
     } catch (err) {
       console.error("[line/webhook] personal file upload failed:", err);
       return [{ type: "text", text: "⚠️ อัปโหลดไม่สำเร็จ / Upload failed" }];
