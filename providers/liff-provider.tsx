@@ -22,6 +22,31 @@ const LiffContext = createContext<LiffState>({
   logout: () => {},
 });
 
+function waitForLiffSdk(
+  timeoutMs = 5000,
+): Promise<NonNullable<typeof window.liff>> {
+  return new Promise((resolve, reject) => {
+    if (window.liff) {
+      resolve(window.liff);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const interval = window.setInterval(() => {
+      if (window.liff) {
+        window.clearInterval(interval);
+        resolve(window.liff);
+        return;
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        window.clearInterval(interval);
+        reject(new Error("LIFF SDK did not load"));
+      }
+    }, 50);
+  });
+}
+
 export function LiffProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
@@ -29,31 +54,37 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const liffId      = process.env.NEXT_PUBLIC_LIFF_ID;
-    const devUserId   = process.env.NEXT_PUBLIC_DEV_USER_ID;
+    let cancelled = false;
 
-    // Local dev shortcut — no LIFF id but a dev user configured: send a
-    // literal "dev" Bearer token that the API maps to DEV_USER_ID server-side.
-    if (!liffId) {
-      if (devUserId) {
-        console.log("[LIFF] no NEXT_PUBLIC_LIFF_ID — using dev bypass for", devUserId);
-        configureApiAuth(() => "dev");
-        setReady(true);
+    async function boot() {
+      const liffId = process.env.NEXT_PUBLIC_LIFF_ID;
+      const devUserId = process.env.NEXT_PUBLIC_DEV_USER_ID;
+
+      // Local dev shortcut — no LIFF id but a dev user configured: send a
+      // literal "dev" Bearer token that the API maps to DEV_USER_ID server-side.
+      if (!liffId) {
+        if (devUserId) {
+          console.log(
+            "[LIFF] no NEXT_PUBLIC_LIFF_ID — using dev bypass for",
+            devUserId,
+          );
+          configureApiAuth(() => "dev");
+          if (!cancelled) setReady(true);
+          return;
+        }
+        if (!cancelled) {
+          setError("NEXT_PUBLIC_LIFF_ID is not set");
+          markApiAuthReady(null);
+          setReady(true);
+        }
         return;
       }
-      setError("NEXT_PUBLIC_LIFF_ID is not set");
-      markApiAuthReady(null);
-      setReady(true);
-      return;
-    }
 
-    const liff = window.liff;
+      try {
+        const liff = await waitForLiffSdk();
+        console.log("[LIFF] init start — liffId:", liffId);
 
-    console.log("[LIFF] init start — liffId:", liffId);
-
-    liff
-      .init({ liffId })
-      .then(async () => {
+        await liff.init({ liffId });
         const isLoggedIn = liff.isLoggedIn();
         console.log("[LIFF] init success — isLoggedIn:", isLoggedIn);
         console.log("[LIFF] context:", liff.getContext());
@@ -61,34 +92,48 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
         if (!isLoggedIn) {
           console.log("[LIFF] not logged in → redirecting to LINE login...");
           liff.login();
+          if (!cancelled) setReady(true);
           return;
         }
-
-        console.log("[LIFF] session found, fetching profile...");
-        const userProfile = await liff.getProfile();
-        console.log("[LIFF] profile:", {
-          userId: userProfile.userId,
-          displayName: userProfile.displayName,
-          pictureUrl: userProfile.pictureUrl,
-        });
 
         // LIFF refreshes the ID token internally; reading it on every fetch
         // gives apiFetch a fresh-enough token without us tracking expiry.
         configureApiAuth(() => liff.getIDToken());
+        if (!cancelled) {
+          setLoggedIn(true);
+          setReady(true);
+        }
 
-        setProfile(userProfile);
-        setLoggedIn(true);
-      })
-      .catch((err: unknown) => {
+        // Profile is display-only. Fetch it after the app shell can render so
+        // entering LIFF is not blocked by an extra network/API round trip.
+        liff
+          .getProfile()
+          .then((userProfile) => {
+            console.log("[LIFF] profile:", {
+              userId: userProfile.userId,
+              displayName: userProfile.displayName,
+              pictureUrl: userProfile.pictureUrl,
+            });
+            if (!cancelled) setProfile(userProfile);
+          })
+          .catch((err: unknown) => {
+            console.warn("[LIFF] profile fetch skipped:", err);
+          });
+      } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "LIFF init failed";
         console.error("[LIFF] error:", err);
-        setError(msg);
-        markApiAuthReady(null);
-      })
-      .finally(() => {
-        console.log("[LIFF] ready");
-        setReady(true);
-      });
+        if (!cancelled) {
+          setError(msg);
+          markApiAuthReady(null);
+          setReady(true);
+        }
+      }
+    }
+
+    boot();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function login() {
@@ -102,7 +147,9 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <LiffContext.Provider value={{ ready, loggedIn, profile, error, login, logout }}>
+    <LiffContext.Provider
+      value={{ ready, loggedIn, profile, error, login, logout }}
+    >
       {children}
     </LiffContext.Provider>
   );

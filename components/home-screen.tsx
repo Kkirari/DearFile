@@ -1,14 +1,9 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
 import { Home, Search, FolderOpen, User, Newspaper } from "lucide-react";
 import { HomeTab } from "@/components/screens/home-tab";
-import { FoldersTab } from "@/components/screens/folders-tab";
-import { ProfileTab } from "@/components/screens/profile-tab";
-import { SearchScreen } from "@/components/screens/search-screen";
-import { TimelineTab } from "@/components/screens/timeline-tab";
-import { FileDetailSheet } from "@/components/file-detail-sheet";
-import { ImageLightbox } from "@/components/image-lightbox";
 import { UploadFab } from "@/components/upload-fab";
 import { useFiles } from "@/hooks/use-files";
 import { useFolders } from "@/hooks/use-folders";
@@ -18,6 +13,32 @@ import { apiFetch } from "@/lib/api-client";
 import type { FileItem } from "@/types/file";
 
 type NavId = "home" | "timeline" | "search" | "folders" | "profile";
+
+const TimelineTab = dynamic(
+  () => import("@/components/screens/timeline-tab").then((m) => m.TimelineTab),
+  { ssr: false },
+);
+const FoldersTab = dynamic(
+  () => import("@/components/screens/folders-tab").then((m) => m.FoldersTab),
+  { ssr: false },
+);
+const SearchScreen = dynamic(
+  () =>
+    import("@/components/screens/search-screen").then((m) => m.SearchScreen),
+  { ssr: false },
+);
+const ProfileTab = dynamic(
+  () => import("@/components/screens/profile-tab").then((m) => m.ProfileTab),
+  { ssr: false },
+);
+const FileDetailSheet = dynamic(
+  () => import("@/components/file-detail-sheet").then((m) => m.FileDetailSheet),
+  { ssr: false },
+);
+const ImageLightbox = dynamic(
+  () => import("@/components/image-lightbox").then((m) => m.ImageLightbox),
+  { ssr: false },
+);
 
 interface HomeScreenProps {
   displayName?: string;
