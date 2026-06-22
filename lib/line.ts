@@ -32,6 +32,67 @@ export interface LineFlexMessage {
 
 export type LineMessage = LineTextMessage | LineFlexMessage;
 
+const LINE_MAX_MESSAGES = 5;
+const LINE_TEXT_MAX_CHARS = 5000;
+const LINE_ALT_TEXT_MAX_CHARS = 400;
+// Keep a safety margin under LINE's Flex payload constraints so generated
+// answers/summaries can't make the Messaging API reject the whole reply.
+const LINE_FLEX_SAFE_JSON_BYTES = 45_000;
+
+const LINE_FLEX_LONG_TEXT_CHARS = 1200;
+const LINE_FLEX_MEDIUM_TEXT_CHARS = 240;
+const LINE_FLEX_SHORT_TEXT_CHARS = 80;
+
+function truncateText(value: string, maxChars: number): string {
+  const chars = Array.from(value);
+  if (chars.length <= maxChars) return value;
+  if (maxChars <= 1) return "…";
+  return `${chars.slice(0, maxChars - 1).join("")}…`;
+}
+
+function truncateMiddle(value: string, maxChars: number): string {
+  const chars = Array.from(value);
+  if (chars.length <= maxChars) return value;
+  if (maxChars <= 1) return "…";
+  const keep = maxChars - 1;
+  const start = Math.ceil(keep / 2);
+  const end = Math.floor(keep / 2);
+  return `${chars.slice(0, start).join("")}…${chars.slice(chars.length - end).join("")}`;
+}
+
+function jsonByteLength(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+function flexTooLargeFallback(): LineTextMessage {
+  return {
+    type: "text",
+    text:
+      "บันทึกแล้ว แต่ข้อความยาวเกินกว่าที่ LINE แสดงได้ เปิด DearFile เพื่อดูรายละเอียด\n" +
+      "Saved, but the LINE preview was too large. Open DearFile to view details.",
+  };
+}
+
+function sanitizeLineMessages(messages: LineMessage[]): LineMessage[] {
+  return messages.slice(0, LINE_MAX_MESSAGES).map((message) => {
+    if (message.type === "text") {
+      return {
+        ...message,
+        text: truncateText(message.text, LINE_TEXT_MAX_CHARS),
+      };
+    }
+
+    const sanitized: LineFlexMessage = {
+      ...message,
+      altText: truncateText(message.altText, LINE_ALT_TEXT_MAX_CHARS),
+    };
+
+    return jsonByteLength(sanitized) > LINE_FLEX_SAFE_JSON_BYTES
+      ? flexTooLargeFallback()
+      : sanitized;
+  });
+}
+
 export function verifyLineSignature(
   rawBody: string,
   signature: string | null,
@@ -76,7 +137,10 @@ export async function replyMessage(
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken()}`,
     },
-    body: JSON.stringify({ replyToken, messages }),
+    body: JSON.stringify({
+      replyToken,
+      messages: sanitizeLineMessages(messages),
+    }),
   });
 
   if (!res.ok) {
@@ -99,7 +163,7 @@ export async function pushMessage(
       "Content-Type": "application/json",
       Authorization: `Bearer ${accessToken()}`,
     },
-    body: JSON.stringify({ to, messages }),
+    body: JSON.stringify({ to, messages: sanitizeLineMessages(messages) }),
   });
 
   if (!res.ok) {
@@ -599,13 +663,24 @@ export interface UploadBatchSuccessOpts {
 }
 
 export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
-  const folderLine = opts.workspaceName
-    ? `👥 ${opts.workspaceName} · 📁 ${opts.folderName}`
-    : `📁 ${opts.folderName}`;
+  const filename = truncateMiddle(opts.filename, LINE_FLEX_SHORT_TEXT_CHARS);
+  const folderName = truncateMiddle(
+    opts.folderName,
+    LINE_FLEX_SHORT_TEXT_CHARS,
+  );
+  const workspaceName = opts.workspaceName
+    ? truncateMiddle(opts.workspaceName, LINE_FLEX_SHORT_TEXT_CHARS)
+    : null;
+  const folderLine = workspaceName
+    ? `👥 ${workspaceName} · 📁 ${folderName}`
+    : `📁 ${folderName}`;
 
   return {
     type: "flex",
-    altText: `บันทึก ${opts.filename} แล้ว / Saved ${opts.filename}`,
+    altText: truncateText(
+      `บันทึก ${filename} แล้ว / Saved ${filename}`,
+      LINE_ALT_TEXT_MAX_CHARS,
+    ),
     contents: {
       type: "bubble",
       size: "micro",
@@ -634,7 +709,7 @@ export function uploadSuccessBubble(opts: UploadSuccessOpts): LineFlexMessage {
               },
               {
                 type: "text",
-                text: opts.filename,
+                text: filename,
                 weight: "bold",
                 size: "sm",
                 color: TEXT_DARK_WARM,
@@ -683,16 +758,26 @@ export function uploadBatchSuccessBubble(
 ): LineFlexMessage {
   const shown = opts.files.slice(0, 5);
   const hiddenCount = Math.max(opts.files.length - shown.length, 0);
-  const folders = Array.from(
+  const uniqueFolders = Array.from(
     new Set(opts.files.map((f) => f.folderName)),
-  ).slice(0, 2);
-  const folderLine = opts.workspaceName
-    ? `👥 ${opts.workspaceName} · 📁 ${folders.join(", ")}${folders.length < new Set(opts.files.map((f) => f.folderName)).size ? "…" : ""}`
-    : `📁 ${folders.join(", ")}${folders.length < new Set(opts.files.map((f) => f.folderName)).size ? "…" : ""}`;
+  );
+  const folders = uniqueFolders
+    .slice(0, 2)
+    .map((folder) => truncateMiddle(folder, LINE_FLEX_SHORT_TEXT_CHARS));
+  const workspaceName = opts.workspaceName
+    ? truncateMiddle(opts.workspaceName, LINE_FLEX_SHORT_TEXT_CHARS)
+    : null;
+  const folderSuffix = `${folders.join(", ")}${folders.length < uniqueFolders.length ? "…" : ""}`;
+  const folderLine = workspaceName
+    ? `👥 ${workspaceName} · 📁 ${folderSuffix}`
+    : `📁 ${folderSuffix}`;
 
   return {
     type: "flex",
-    altText: `บันทึก ${opts.files.length} ไฟล์แล้ว / Saved ${opts.files.length} files`,
+    altText: truncateText(
+      `บันทึก ${opts.files.length} ไฟล์แล้ว / Saved ${opts.files.length} files`,
+      LINE_ALT_TEXT_MAX_CHARS,
+    ),
     contents: {
       type: "bubble",
       size: "kilo",
@@ -756,7 +841,7 @@ export function uploadBatchSuccessBubble(
               },
               {
                 type: "text" as const,
-                text: file.filename,
+                text: truncateMiddle(file.filename, LINE_FLEX_SHORT_TEXT_CHARS),
                 color: TEXT_DARK_WARM,
                 size: "sm" as const,
                 weight: "bold" as const,
@@ -955,19 +1040,24 @@ export function answerBubble(
   answer: string,
   rows: AnswerRow[],
 ): LineFlexMessage {
+  const safeAnswer = truncateText(
+    answer.trim() || "—",
+    LINE_FLEX_LONG_TEXT_CHARS,
+  );
   const bodyContents: unknown[] = [
     {
       type: "text",
-      text: answer,
+      text: safeAnswer,
       size: "sm",
       color: TEXT_DARK_WARM,
       wrap: true,
     },
   ];
 
-  if (rows.length > 0) {
+  const safeRows = rows.slice(0, 3);
+  if (safeRows.length > 0) {
     bodyContents.push({ type: "separator", margin: "lg", color: BORDER_BEIGE });
-    for (const row of rows) {
+    for (const row of safeRows) {
       bodyContents.push({
         type: "box",
         layout: "baseline",
@@ -978,7 +1068,7 @@ export function answerBubble(
           { type: "text", text: row.icon, flex: 0, size: "sm" },
           {
             type: "text",
-            text: row.label,
+            text: truncateMiddle(row.label, LINE_FLEX_SHORT_TEXT_CHARS),
             size: "sm",
             color: BRAND_MAUVE,
             weight: "bold",
@@ -990,7 +1080,7 @@ export function answerBubble(
     }
   }
 
-  const altText = answer.length > 60 ? `${answer.slice(0, 57)}...` : answer;
+  const altText = truncateText(safeAnswer, 60);
 
   return {
     type: "flex",
@@ -1029,6 +1119,11 @@ export function summaryBubble(
   liffUrlFor: (entry: IndexEntry) => string,
   liffHome: string,
 ): LineFlexMessage {
+  const summaryText = truncateText(
+    view.text.trim() || "—",
+    LINE_FLEX_LONG_TEXT_CHARS,
+  );
+  const highlights = view.highlights.slice(0, 3);
   const bodyContents: unknown[] = [
     {
       type: "text",
@@ -1039,7 +1134,7 @@ export function summaryBubble(
     },
     {
       type: "text",
-      text: view.text,
+      text: summaryText,
       size: "sm",
       color: TEXT_DARK_WARM,
       wrap: true,
@@ -1047,9 +1142,9 @@ export function summaryBubble(
     },
   ];
 
-  if (view.highlights.length > 0) {
+  if (highlights.length > 0) {
     bodyContents.push({ type: "separator", margin: "lg", color: BORDER_BEIGE });
-    for (const entry of view.highlights) {
+    for (const entry of highlights) {
       bodyContents.push({
         type: "box",
         layout: "baseline",
@@ -1060,7 +1155,7 @@ export function summaryBubble(
           { type: "text", text: "📄", flex: 0, size: "sm" },
           {
             type: "text",
-            text: entry.filename,
+            text: truncateMiddle(entry.filename, LINE_FLEX_SHORT_TEXT_CHARS),
             size: "sm",
             color: BRAND_MAUVE,
             weight: "bold",
@@ -1153,13 +1248,18 @@ export function captureResultBubble(
   liffTimelineUrl: string,
 ): LineFlexMessage {
   const icon = item.type === "link" ? "🔗" : "📝";
-  const title =
-    item.title?.trim() || (item.type === "link" ? "Saved link" : "Saved note");
-  const summary = item.summary?.trim() || "—";
+  const title = truncateText(
+    item.title?.trim() || (item.type === "link" ? "Saved link" : "Saved note"),
+    LINE_FLEX_SHORT_TEXT_CHARS,
+  );
+  const summary = truncateText(
+    item.summary?.trim() || "—",
+    LINE_FLEX_LONG_TEXT_CHARS,
+  );
   const tagLine = (item.tags ?? [])
     .filter(Boolean)
     .slice(0, 5)
-    .map((t) => `#${t}`)
+    .map((t) => `#${truncateText(t, 30)}`)
     .join("  ");
 
   const bodyContents: unknown[] = [
@@ -1224,7 +1324,10 @@ export function captureResultBubble(
 
   return {
     type: "flex",
-    altText: `✓ บันทึกแล้ว: ${title} / Saved to Timeline`,
+    altText: truncateText(
+      `✓ บันทึกแล้ว: ${title} / Saved to Timeline`,
+      LINE_ALT_TEXT_MAX_CHARS,
+    ),
     contents: {
       type: "bubble",
       size: "kilo",
