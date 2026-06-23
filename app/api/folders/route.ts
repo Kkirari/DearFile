@@ -196,7 +196,7 @@ export async function POST(req: Request) {
       ContentType: "application/json",
     }));
 
-    if (scope.kind === "user") invalidatePreviews(userId);
+    invalidatePreviews(scope.kind === "workspace" ? `ws:${scope.workspaceId}` : userId);
 
     const folderItem: FolderItem = {
       id,
@@ -382,7 +382,7 @@ export async function DELETE(req: Request) {
         : userFolderMetaKey(userId, id),
     }));
 
-    if (scope.kind === "user") invalidatePreviews(userId);
+    invalidatePreviews(scope.kind === "workspace" ? `ws:${scope.workspaceId}` : userId);
 
     return Response.json({ ok: true, deletedFiles, removedFromIndex });
   } catch (err) {

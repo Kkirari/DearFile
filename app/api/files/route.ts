@@ -236,6 +236,7 @@ export async function DELETE(req: Request) {
 
       await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
       try { await removeWorkspaceEntry(workspaceId, key); } catch { /* ignore */ }
+      invalidatePreviews(`ws:${workspaceId}`);
       return Response.json({ ok: true });
     }
 
@@ -247,7 +248,7 @@ export async function DELETE(req: Request) {
     }
     await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }));
     try { await removeEntry(userId, key); } catch { /* ignore */ }
-    invalidatePreviews(userId);
+    invalidatePreviews(workspaceId ? `ws:${workspaceId}` : userId);
     return Response.json({ ok: true });
   } catch (err) {
     if (err instanceof AuthError) return authErrorResponse(err);

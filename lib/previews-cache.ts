@@ -1,5 +1,5 @@
 /**
- * In-process per-user TTL cache for the /api/folders/previews response.
+ * In-process per-user/workspace TTL cache for the /api/folders/previews response.
  *
  * The previews route fans out to ~N+2 S3 ListObjectsV2 calls per render
  * (one per user folder + uploads + folder-meta) plus a search-index load,
@@ -10,6 +10,8 @@
  * TTL is short so stale data after a missed-invalidation is bounded; all
  * known mutating routes call invalidate() on success so the happy path
  * stays fresh.
+ *
+ * Cache key format: userId for personal, ws:workspaceId for workspace
  */
 
 import type { FolderPreview } from "@/types/preview";
@@ -17,20 +19,20 @@ import type { FolderPreview } from "@/types/preview";
 const TTL_MS = 30_000;
 const cache = new Map<string, { data: Record<string, FolderPreview>; expiresAt: number }>();
 
-export function getCached(userId: string): Record<string, FolderPreview> | null {
-  const entry = cache.get(userId);
+export function getCached(cacheKey: string): Record<string, FolderPreview> | null {
+  const entry = cache.get(cacheKey);
   if (!entry) return null;
   if (entry.expiresAt <= Date.now()) {
-    cache.delete(userId);
+    cache.delete(cacheKey);
     return null;
   }
   return entry.data;
 }
 
-export function setCached(userId: string, data: Record<string, FolderPreview>): void {
-  cache.set(userId, { data, expiresAt: Date.now() + TTL_MS });
+export function setCached(cacheKey: string, data: Record<string, FolderPreview>): void {
+  cache.set(cacheKey, { data, expiresAt: Date.now() + TTL_MS });
 }
 
-export function invalidatePreviews(userId: string): void {
-  cache.delete(userId);
+export function invalidatePreviews(userIdOrCacheKey: string): void {
+  cache.delete(userIdOrCacheKey);
 }
