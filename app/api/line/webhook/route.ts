@@ -1152,7 +1152,7 @@ async function handleMessageEvent(
         name: summary?.groupName,
       });
     } else if (!workspace.members.some((m) => m.userId === userId)) {
-      // Auto-add as member on first upload
+      // Auto-add as member on any group activity (text, file, postback)
       workspace = await addMember(workspace.id, userId, "member");
     }
 

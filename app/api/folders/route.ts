@@ -28,6 +28,7 @@ import {
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 import { requireWorkspaceAccess, type WorkspaceMember } from "@/lib/workspace";
 import { invalidatePreviews } from "@/lib/previews-cache";
+import { ensureWorkspaceMember } from "@/lib/workspace-access";
 import {
   type FolderMode,
   DEFAULT_FOLDER_MODE,
@@ -57,6 +58,7 @@ async function resolveScope(
   if (!isSafeWorkspaceId(workspaceIdInput)) {
     throw new AuthError(400, "Invalid workspaceId");
   }
+  await ensureWorkspaceMember(workspaceIdInput, userId);
   const member = await requireWorkspaceAccess(userId, workspaceIdInput);
   return { kind: "workspace", userId, workspaceId: workspaceIdInput, member };
 }

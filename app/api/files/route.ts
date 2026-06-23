@@ -25,6 +25,7 @@ import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 import { requireWorkspaceAccess, getFolderPermission } from "@/lib/workspace";
 import { canDeleteFileInFolder } from "@/lib/folder-permissions";
 import { invalidatePreviews } from "@/lib/previews-cache";
+import { ensureWorkspaceMember } from "@/lib/workspace-access";
 
 /**
  * Resolve the listing scope from the request: per-user (default) or
@@ -39,6 +40,8 @@ async function resolveScope(userId: string, workspaceIdParam: string | null): Pr
   if (!isSafeWorkspaceId(workspaceIdParam)) {
     throw new AuthError(400, "Invalid workspaceId");
   }
+  // Auto-join group members on deep-link click
+  await ensureWorkspaceMember(workspaceIdParam, userId);
   await requireWorkspaceAccess(userId, workspaceIdParam);
   return { kind: "workspace", userId, workspaceId: workspaceIdParam };
 }
