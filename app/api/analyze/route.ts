@@ -127,7 +127,8 @@ export async function POST(req: Request) {
     // The new file is now visible — drop the previews cache so the next
     // /api/folders/previews call recomputes thumbnails for the affected
     // (and AI) folders.
-    if (!isWorkspaceCall) invalidatePreviews(userId);
+    if (isWorkspaceCall) invalidatePreviews(`ws:${workspaceId}`);
+    else invalidatePreviews(userId);
 
     return Response.json({
       ...analysis,

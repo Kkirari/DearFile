@@ -39,9 +39,10 @@ export function useFolderPreviews(refreshKey: number | string = 0) {
     }
   }, [currentWorkspaceId]);
 
+  // Re-fetch when workspace changes or refresh key changes
   useEffect(() => {
     fetchPreviews();
-  }, [fetchPreviews, refreshKey]);
+  }, [fetchPreviews, refreshKey, currentWorkspaceId]);
 
   return { previews, loading, refresh: fetchPreviews };
 }
