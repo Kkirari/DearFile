@@ -15,6 +15,7 @@ import {
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 import { requireWorkspaceAccess, getFolderPermission } from "@/lib/workspace";
 import { canUploadToFolder } from "@/lib/folder-permissions";
+import { ensureWorkspaceMember } from "@/lib/workspace-access";
 
 const ALLOWED_EXTENSIONS = new Set([
   "pdf",  "txt",
@@ -75,6 +76,7 @@ export async function POST(req: Request) {
       if (!isSafeWorkspaceId(workspaceId)) {
         return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
       }
+      await ensureWorkspaceMember(workspaceId, userId);
       const member = await requireWorkspaceAccess(userId, workspaceId);
 
       if (safeFolderId && !(await workspaceFolderMetaExists(workspaceId, safeFolderId))) {

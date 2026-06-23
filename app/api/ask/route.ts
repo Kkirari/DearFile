@@ -2,6 +2,7 @@ import { askDearFile, type AskScope } from "@/lib/ask";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 import { requireWorkspaceAccess } from "@/lib/workspace";
 import { isSafeWorkspaceId } from "@/lib/s3";
+import { ensureWorkspaceMember } from "@/lib/workspace-access";
 
 /**
  * Test/headless endpoint for the "Ask DearFile" engine — lets us exercise the
@@ -40,6 +41,7 @@ export async function POST(req: Request) {
       if (!isSafeWorkspaceId(workspaceId)) {
         return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
       }
+      await ensureWorkspaceMember(workspaceId, userId);
       await requireWorkspaceAccess(userId, workspaceId);
       scope = { kind: "workspace", workspaceId };
     } else {

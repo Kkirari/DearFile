@@ -15,6 +15,7 @@ import { searchFiles } from "@/lib/file-search";
 import type { FileItem } from "@/types/file";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 import { requireWorkspaceAccess } from "@/lib/workspace";
+import { ensureWorkspaceMember } from "@/lib/workspace-access";
 
 export interface SearchResultItem extends FileItem {
   score: number;
@@ -59,6 +60,7 @@ export async function GET(req: Request) {
       if (!isSafeWorkspaceId(workspaceId)) {
         return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
       }
+      await ensureWorkspaceMember(workspaceId, userId);
       await requireWorkspaceAccess(userId, workspaceId);
       wsId = workspaceId;
     }
