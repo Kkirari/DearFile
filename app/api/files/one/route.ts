@@ -11,6 +11,7 @@ import {
 import type { FileItem } from "@/types/file";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 import { requireWorkspaceAccess } from "@/lib/workspace";
+import { ensureWorkspaceMember } from "@/lib/workspace-access";
 
 /**
  * Resolve a single file by its S3 key into a `FileItem` with a fresh signed
@@ -47,6 +48,7 @@ export async function GET(req: Request) {
       if (!isSafeWorkspaceId(workspaceId)) {
         return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
       }
+      await ensureWorkspaceMember(workspaceId, userId);
       await requireWorkspaceAccess(userId, workspaceId);
       if (!isWorkspaceOwnedKey(key, workspaceId)) {
         return Response.json({ error: "File is not in this workspace" }, { status: 403 });

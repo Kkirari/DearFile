@@ -65,8 +65,23 @@ export function FileDetailSheet({
     setTimeout(() => { setIsClosing(false); onClose(); }, 260);
   }
 
-  function handlePreview() {
+  async function handlePreview() {
     if (type === "image") {
+      // Fetch fresh presigned URL before opening lightbox (old URLs expire)
+      try {
+        const freshRes = await apiFetch(
+          `/api/files/one?key=${encodeURIComponent(file.id)}${
+            currentWorkspaceId ? `&workspaceId=${currentWorkspaceId}` : ""
+          }`
+        );
+        if (freshRes.ok) {
+          const { file: freshFile } = await freshRes.json() as { file: FileItem };
+          // Update the file object with fresh URL
+          Object.assign(file, { url: freshFile.url });
+        }
+      } catch (err) {
+        console.warn("[preview] failed to fetch fresh URL:", err);
+      }
       close();
       setTimeout(onOpenLightbox, 120);
     } else {

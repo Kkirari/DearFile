@@ -26,6 +26,7 @@ import { AI_FOLDERS } from "@/lib/ai-folders";
 import { getAllEntries, getAllWorkspaceEntries } from "@/lib/search-index";
 import { requireUserId, authErrorResponse, AuthError } from "@/lib/auth";
 import { requireWorkspaceAccess } from "@/lib/workspace";
+import { ensureWorkspaceMember } from "@/lib/workspace-access";
 import { getCached, setCached } from "@/lib/previews-cache";
 import type { PreviewItem, FolderPreview } from "@/types/preview";
 
@@ -77,6 +78,7 @@ export async function GET(req: Request) {
       if (!isSafeWorkspaceId(workspaceId)) {
         return Response.json({ error: "Invalid workspaceId" }, { status: 400 });
       }
+      await ensureWorkspaceMember(workspaceId, userId);
       await requireWorkspaceAccess(userId, workspaceId);
       wsId = workspaceId;
     }
