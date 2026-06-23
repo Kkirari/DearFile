@@ -800,13 +800,6 @@ export function uploadBatchSuccessBubble(
             size: "lg",
             wrap: true,
           },
-          {
-            type: "text",
-            text: "Saved as one batch, no chat spam",
-            color: "#FFFFFFCC",
-            size: "xs",
-            wrap: true,
-          },
         ],
       },
       body: {
