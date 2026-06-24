@@ -194,6 +194,32 @@ export async function fetchGroupSummary(
 }
 
 /**
+ * Fetch a LINE user's profile (display name, picture URL, status message).
+ * Returns null if the user hasn't friended the bot or the profile is inaccessible.
+ */
+export async function fetchUserProfile(
+  userId: string,
+): Promise<{ userId: string; displayName: string; pictureUrl?: string; statusMessage?: string } | null> {
+  try {
+    const res = await fetch(
+      `https://api.line.me/v2/bot/profile/${userId}`,
+      {
+        headers: { Authorization: `Bearer ${accessToken()}` },
+      },
+    );
+    if (!res.ok) return null;
+    return res.json() as Promise<{
+      userId: string;
+      displayName: string;
+      pictureUrl?: string;
+      statusMessage?: string;
+    }>;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Make the bot leave a LINE group. LINE returns 200 on success; 404 if the
  * bot isn't in the group anymore (already left / kicked). We treat 404 as a
  * no-op so the caller can fire-and-forget.
