@@ -26,6 +26,7 @@ import { requireWorkspaceAccess, getFolderPermission } from "@/lib/workspace";
 import { canDeleteFileInFolder } from "@/lib/folder-permissions";
 import { invalidatePreviews } from "@/lib/previews-cache";
 import { ensureWorkspaceMember } from "@/lib/workspace-access";
+import { fetchUserProfile } from "@/lib/line";
 
 /**
  * Resolve the listing scope from the request: per-user (default) or
@@ -100,6 +101,7 @@ export async function GET(req: Request) {
       const entries = scope.kind === "workspace"
         ? await workspaceEntriesByAiFolder(scope.workspaceId, folderId)
         : await entriesByAiFolder(userId, folderId);
+
       const files: FileItem[] = await Promise.all(
         entries.map(async (e) => {
           const url = await getSignedUrl(
@@ -107,7 +109,8 @@ export async function GET(req: Request) {
             new GetObjectCommand({ Bucket: BUCKET, Key: e.key }),
             { expiresIn: 3600 },
           );
-          return {
+
+          const baseFile: FileItem = {
             id:        e.key,
             name:      e.filename,
             size:      e.size,
@@ -116,6 +119,18 @@ export async function GET(req: Request) {
             createdAt: e.createdAt,
             userId,
           };
+
+          // For workspace files, fetch uploader profile if available
+          if (scope.kind === "workspace" && e.uploaderId) {
+            const profile = await fetchUserProfile(e.uploaderId);
+            if (profile) {
+              baseFile.uploaderId = e.uploaderId;
+              baseFile.uploaderName = profile.displayName;
+              baseFile.uploaderPictureUrl = profile.pictureUrl;
+            }
+          }
+
+          return baseFile;
         }),
       );
       files.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());

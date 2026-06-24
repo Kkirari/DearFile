@@ -181,6 +181,27 @@ export function FileDetailSheet({
             <p className="mt-1 text-[12px] text-[#b0a396] dark:text-[#6e6460]">
               {formatBytes(file.size)} · {formatDate(file.createdAt)}
             </p>
+            {/* Uploader info (workspace files only) */}
+            {file.uploaderName && (
+              <div className="mt-1.5 flex items-center gap-1.5">
+                {file.uploaderPictureUrl ? (
+                  <img
+                    src={file.uploaderPictureUrl}
+                    alt={file.uploaderName}
+                    className="h-4 w-4 rounded-full object-cover"
+                  />
+                ) : (
+                  <div className="h-4 w-4 rounded-full bg-[#9b869c] flex items-center justify-center">
+                    <span className="text-[9px] text-white font-bold">
+                      {file.uploaderName.charAt(0).toUpperCase()}
+                    </span>
+                  </div>
+                )}
+                <span className="text-[11px] text-[#9b869c] dark:text-[#9b869c] font-medium">
+                  {file.uploaderName}
+                </span>
+              </div>
+            )}
           </div>
           <button
             onClick={close}
