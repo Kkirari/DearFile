@@ -57,6 +57,19 @@ async function objectsToFiles(
     ? new RegExp(`^users/${scope.userId}/(uploads/|folders/[^/]+/)`)
     : new RegExp(`^workspaces/${scope.workspaceId}/(inbox/|folders/[^/]+/)`);
 
+  // For workspace files, we need to look up the uploader from the search index
+  // since S3 objects don't store that metadata directly (it's in index + tags).
+  let indexMap: Map<string, string> | null = null;
+  if (scope.kind === "workspace") {
+    try {
+      const { getAllWorkspaceEntries } = await import("@/lib/search-index");
+      const entries = await getAllWorkspaceEntries(scope.workspaceId);
+      indexMap = new Map(entries.map((e) => [e.key, e.uploaderId ?? ""]));
+    } catch {
+      // Index lookup failed, continue without uploader info
+    }
+  }
+
   return Promise.all(
     objects.filter((obj) => obj.Key && obj.Size).map(async (obj) => {
       const rawName = obj.Key!.replace(stripPrefix, "");
@@ -66,7 +79,8 @@ async function objectsToFiles(
         new GetObjectCommand({ Bucket: BUCKET, Key: obj.Key! }),
         { expiresIn: 3600 },
       );
-      return {
+
+      const baseFile: FileItem = {
         id:        obj.Key!,
         name,
         size:      obj.Size!,
@@ -75,6 +89,21 @@ async function objectsToFiles(
         createdAt: obj.LastModified?.toISOString() ?? new Date().toISOString(),
         userId:    scope.userId,
       };
+
+      // Add uploader info for workspace files
+      if (scope.kind === "workspace" && indexMap) {
+        const uploaderId = indexMap.get(obj.Key!);
+        if (uploaderId) {
+          const profile = await fetchUserProfile(uploaderId);
+          if (profile) {
+            baseFile.uploaderId = uploaderId;
+            baseFile.uploaderName = profile.displayName;
+            baseFile.uploaderPictureUrl = profile.pictureUrl;
+          }
+        }
+      }
+
+      return baseFile;
     }),
   );
 }
