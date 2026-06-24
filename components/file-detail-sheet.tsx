@@ -48,6 +48,7 @@ export function FileDetailSheet({
   const [isClosing, setIsClosing]         = useState(false);
   const [deleting, setDeleting]           = useState(false);
   const [moving, setMoving]               = useState(false);
+  const [loadingPreview, setLoadingPreview] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [movePickerOpen, setMovePickerOpen] = useState(false);
   const [shareOpen, setShareOpen]           = useState(false);
@@ -67,23 +68,42 @@ export function FileDetailSheet({
 
   async function handlePreview() {
     if (type === "image") {
-      // Fetch fresh presigned URL before opening lightbox (old URLs expire)
-      try {
-        const freshRes = await apiFetch(
-          `/api/files/one?key=${encodeURIComponent(file.id)}${
-            currentWorkspaceId ? `&workspaceId=${currentWorkspaceId}` : ""
-          }`
-        );
+      setLoadingPreview(true);
+
+      // Fetch fresh presigned URL in parallel with closing animation
+      let freshUrl = file.url;
+      const urlPromise = apiFetch(
+        `/api/files/one?key=${encodeURIComponent(file.id)}${
+          currentWorkspaceId ? `&workspaceId=${currentWorkspaceId}` : ""
+        }`
+      ).then(async (freshRes) => {
         if (freshRes.ok) {
           const { file: freshFile } = await freshRes.json() as { file: FileItem };
-          // Update the file object with fresh URL
-          Object.assign(file, { url: freshFile.url });
+          freshUrl = freshFile.url;
+          Object.assign(file, { url: freshUrl });
         }
-      } catch (err) {
+      }).catch((err) => {
         console.warn("[preview] failed to fetch fresh URL:", err);
-      }
+      });
+
+      // Preload the image while fetching URL
+      const img = new Image();
+      const preloadPromise = new Promise<void>((resolve) => {
+        img.onload = () => resolve();
+        img.onerror = () => resolve(); // Continue even if preload fails
+      });
+
+      // Wait for URL fetch, then start preload
+      await urlPromise;
+      img.src = freshUrl;
+
+      // Close sheet immediately, preload continues in background
       close();
-      setTimeout(onOpenLightbox, 120);
+
+      // Wait for preload, then open lightbox
+      await preloadPromise;
+      setLoadingPreview(false);
+      onOpenLightbox();
     } else {
       window.open(file.url, "_blank");
     }
@@ -216,10 +236,11 @@ export function FileDetailSheet({
           {canPreview && (
             <ActionRow
               icon={<Eye size={19} />}
-              label={type === "image" ? "View Image" : type === "video" ? "Play Video" : "Open PDF"}
+              label={loadingPreview ? "Loading…" : type === "image" ? "View Image" : type === "video" ? "Play Video" : "Open PDF"}
               bg="bg-[#9b869c]"
               textColor="text-white"
               onClick={handlePreview}
+              disabled={loadingPreview}
             />
           )}
           <ActionRow
