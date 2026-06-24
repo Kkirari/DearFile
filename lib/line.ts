@@ -511,7 +511,7 @@ export function examplesBubble(liffUrl: string): LineFlexMessage {
                   },
                   {
                     type: "text",
-                    text: "!น้องกวาง สร้างโฟลเดอร์ชื่อการบ้านครั้งที่1",
+                    text: "!น้องกวาง สร้างโฟลเดอร์ ชื่อโฟลเดอร์",
                     color: BRAND_MAUVE,
                     size: "xs",
                     wrap: true,
@@ -872,6 +872,107 @@ export function uploadBatchSuccessBubble(
               type: "uri",
               label: "เปิดทั้งหมด / Open files",
               uri: opts.liffUrl,
+            },
+          },
+        ],
+      },
+    },
+  };
+}
+
+/**
+ * Folder created confirmation bubble (group workspace).
+ */
+export function folderCreatedBubble(
+  folderName: string,
+  workspaceName: string,
+  liffUrl: string,
+): LineFlexMessage {
+  const truncatedFolder = truncateMiddle(folderName, LINE_FLEX_SHORT_TEXT_CHARS);
+  const truncatedWorkspace = truncateMiddle(workspaceName, LINE_FLEX_SHORT_TEXT_CHARS);
+
+  return {
+    type: "flex",
+    altText: truncateText(
+      `สร้างโฟลเดอร์ "${folderName}" แล้ว / Created folder "${folderName}"`,
+      LINE_ALT_TEXT_MAX_CHARS,
+    ),
+    contents: {
+      type: "bubble",
+      size: "micro",
+      styles: {
+        body: { backgroundColor: CARD_CREAM },
+        footer: { backgroundColor: CARD_CREAM },
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        spacing: "sm",
+        contents: [
+          {
+            type: "box",
+            layout: "baseline",
+            spacing: "sm",
+            contents: [
+              {
+                type: "text",
+                text: "✓",
+                color: BRAND_MAUVE,
+                weight: "bold",
+                size: "lg",
+                flex: 0,
+              },
+              {
+                type: "text",
+                text: "สร้างโฟลเดอร์แล้ว",
+                weight: "bold",
+                size: "md",
+                color: TEXT_DARK_WARM,
+                flex: 1,
+              },
+            ],
+          },
+          {
+            type: "box",
+            layout: "vertical",
+            spacing: "xs",
+            margin: "md",
+            contents: [
+              {
+                type: "text",
+                text: `📁 ${truncatedFolder}`,
+                size: "sm",
+                color: TEXT_DARK_WARM,
+                weight: "bold",
+                wrap: true,
+              },
+              {
+                type: "text",
+                text: `ใน ${truncatedWorkspace}`,
+                size: "xs",
+                color: TEXT_TAUPE,
+                wrap: true,
+              },
+            ],
+          },
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        paddingTop: "0px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: BRAND_MAUVE,
+            height: "sm",
+            action: {
+              type: "uri",
+              label: "เปิดโฟลเดอร์ / Open Folders",
+              uri: liffUrl,
             },
           },
         ],
