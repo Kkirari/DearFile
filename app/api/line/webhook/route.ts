@@ -33,6 +33,7 @@ import {
   examplesBubble,
   fetchGroupSummary,
   fetchLineContent,
+  folderCreatedBubble,
   greetingBubble,
   GROUP_LEAVE_REPLY_TEXT,
   helpBubble,
@@ -734,14 +735,46 @@ async function handleWorkspaceFileMessage(
 
 // ── /folder command (group, owner only) ───────────────────────────────────
 
+/**
+ * Parse a folder-creation command. Accepts multiple formats:
+ *   - /folder Name, /new folder Name
+ *   - !น้องกวาง สร้างโฟลเดอร์ Name
+ *   - !dearfile create folder Name
+ *   - Thai typo variants: สร้างโฟเดอ, สร้างโฟลเด่อ, etc.
+ */
+function parseFolderCommand(text: string): string | null {
+  const t = text.trim();
+
+  // Strip leading sigil + trigger if present
+  const sigilMatch = t.match(/^[!/@]?\s*(?:น้องกวาง|dearfile)\s+/i);
+  const rest = sigilMatch ? t.slice(sigilMatch[0].length).trim() : t;
+
+  // English: "create folder Name"
+  const enMatch = rest.match(/^create\s+folder\s+(.+)$/i);
+  if (enMatch) return enMatch[1].trim();
+
+  // Direct command: "/folder Name", "/new folder Name"
+  const directMatch = rest.match(/^\/?\s*(?:new\s+)?folder\s+(.+)$/i);
+  if (directMatch) return directMatch[1].trim();
+
+  // Thai: flexible matching for common variants
+  // สร้างโฟลเดอร์, สร้างโฟเดอ, โฟลเดอร์, โฟเดอ, etc.
+  const thaiMatch = rest.match(/^(?:สร้าง)?(?:โฟลเดอร์|โฟเดอร์|โฟลเดอ|โฟเดอ|โฟลเด่อ)\s+(.+)$/i);
+  if (thaiMatch) return thaiMatch[1].trim();
+
+  return null;
+}
+
 async function handleFolderCommand(
   workspace: WorkspaceMeta,
   uploaderId: string,
   text: string,
 ): Promise<LineMessage[] | null> {
-  // accept: /folder Name, /new folder Name, /สร้างโฟลเดอร์ Name
-  const match = text.match(/^\/(?:folder|new folder|สร้างโฟลเดอร์)\s+(.+)$/i);
-  if (!match) return null;
+  const name = parseFolderCommand(text);
+  if (!name) return null;
+
+  const trimmedName = name.slice(0, 80);
+  if (!trimmedName) return null;
 
   const isOwner = workspace.members.some(
     (m) => m.userId === uploaderId && m.role === "owner",
@@ -757,9 +790,6 @@ async function handleFolderCommand(
     ];
   }
 
-  const name = match[1].trim().slice(0, 80);
-  if (!name) return null;
-
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
   await s3.send(
@@ -768,7 +798,7 @@ async function handleFolderCommand(
       Key: workspaceFolderMetaKey(workspace.id, id),
       Body: JSON.stringify({
         id,
-        name,
+        name: trimmedName,
         owner: "user",
         createdAt,
         createdBy: uploaderId,
@@ -777,14 +807,7 @@ async function handleFolderCommand(
     }),
   );
 
-  return [
-    {
-      type: "text",
-      text:
-        `✅ สร้างโฟลเดอร์ "${name}" ใน ${workspace.name}\n` +
-        `Created folder "${name}" in ${workspace.name}.`,
-    },
-  ];
+  return [folderCreatedBubble(trimmedName, workspace.name, liffUrl({ ws: workspace.id, tab: "folders" }))];
 }
 
 // ── Ask DearFile (chat retrieval) ─────────────────────────────────────────
