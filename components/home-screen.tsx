@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { useEffect, useRef, useState } from "react";
-import { Home, Search, FolderOpen, User, Newspaper } from "lucide-react";
+import { Home, Search, FolderOpen, User, Newspaper, Calendar } from "lucide-react";
 import { HomeTab } from "@/components/screens/home-tab";
 import { UploadFab } from "@/components/upload-fab";
 import { useFiles } from "@/hooks/use-files";
@@ -12,10 +12,14 @@ import { useWorkspace } from "@/providers/workspace-provider";
 import { apiFetch } from "@/lib/api-client";
 import type { FileItem } from "@/types/file";
 
-type NavId = "home" | "timeline" | "search" | "folders" | "profile";
+type NavId = "home" | "timeline" | "calendar" | "search" | "folders" | "profile";
 
 const TimelineTab = dynamic(
   () => import("@/components/screens/timeline-tab").then((m) => m.TimelineTab),
+  { ssr: false },
+);
+const CalendarTab = dynamic(
+  () => import("@/components/screens/calendar-tab").then((m) => m.CalendarTab),
   { ssr: false },
 );
 const FoldersTab = dynamic(
@@ -43,9 +47,10 @@ const ImageLightbox = dynamic(
 interface HomeScreenProps {
   displayName?: string;
   pictureUrl?: string;
+  userId?: string;
 }
 
-export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
+export function HomeScreen({ displayName, pictureUrl, userId }: HomeScreenProps) {
   const [activeNav, setActiveNav] = useState<NavId>("home");
   // Remember the tab the user was on before opening Search, so the back arrow
   // returns there instead of always going to home.
@@ -113,6 +118,7 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
     const tab = new URLSearchParams(window.location.search).get("tab");
     if (
       tab === "timeline" ||
+      tab === "calendar" ||
       tab === "folders" ||
       tab === "profile" ||
       tab === "home"
@@ -130,7 +136,7 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
   const NAV_ITEMS = [
     { id: "home" as NavId, label: tr.navHome, icon: Home },
     { id: "timeline" as NavId, label: tr.navTimeline, icon: Newspaper },
-    { id: "search" as NavId, label: tr.navSearch, icon: Search },
+    { id: "calendar" as NavId, label: "ปฏิทิน", icon: Calendar },
     { id: "folders" as NavId, label: tr.navFolders, icon: FolderOpen },
     { id: "profile" as NavId, label: tr.navProfile, icon: User },
   ];
@@ -164,6 +170,9 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
           onRefresh={refreshFiles}
         />
       )}
+      {activeNav === "calendar" && userId && (
+        <CalendarTab userId={userId} />
+      )}
       {activeNav === "folders" && (
         <FoldersTab
           folders={folders}
@@ -194,6 +203,20 @@ export function HomeScreen({ displayName, pictureUrl }: HomeScreenProps) {
           onUploadComplete={refreshFiles}
           onFolderRefresh={refreshFolders}
         />
+      )}
+
+      {/* ── SEARCH FAB ── */}
+      {(activeNav === "home" || activeNav === "timeline" || activeNav === "calendar" || activeNav === "folders") && (
+        <button
+          onClick={() => {
+            setSearchOrigin(activeNav);
+            setActiveNav("search");
+          }}
+          className="fixed bottom-[88px] right-4 z-40 flex h-12 w-12 items-center justify-center rounded-full bg-[#9b869c] text-white shadow-lg active:scale-95 transition-transform"
+          aria-label="Search"
+        >
+          <Search size={20} />
+        </button>
       )}
 
       {/* ── BOTTOM NAV ── */}
