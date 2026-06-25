@@ -1,12 +1,11 @@
 /**
- * Calendar tab — simple list view of upcoming reminders.
- * Groups by "today", "tomorrow", and future dates.
+ * Calendar tab — month calendar grid view with event dots + list of selected day's events.
  */
 
 "use client";
 
 import { useState } from "react";
-import { Calendar, Clock, Trash2, X } from "lucide-react";
+import { Calendar, Clock, Trash2, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { useCalendarEvents } from "@/hooks/use-calendar-events";
 import type { CalendarEvent } from "@/lib/db";
 
@@ -17,6 +16,11 @@ interface CalendarTabProps {
 export function CalendarTab({ userId }: CalendarTabProps) {
   const { events, loading, error, cancelEvent } = useCalendarEvents(userId);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
+  const [currentMonth, setCurrentMonth] = useState(() => {
+    const now = new Date();
+    return { year: now.getFullYear(), month: now.getMonth() }; // 0-indexed
+  });
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
   if (loading) {
     return (
@@ -39,15 +43,39 @@ export function CalendarTab({ userId }: CalendarTabProps) {
     );
   }
 
-  // Group events by date
   const today = new Date().toISOString().split("T")[0];
-  const tomorrow = new Date(Date.now() + 86400000).toISOString().split("T")[0];
-
-  const todayEvents = events.filter((e) => e.eventDate === today);
-  const tomorrowEvents = events.filter((e) => e.eventDate === tomorrow);
-  const futureEvents = events.filter((e) => e.eventDate > tomorrow);
-
   const hasEvents = events.length > 0;
+
+  // Build event map: date -> events[]
+  const eventsByDate = new Map<string, CalendarEvent[]>();
+  events.forEach((event) => {
+    const existing = eventsByDate.get(event.eventDate) ?? [];
+    existing.push(event);
+    eventsByDate.set(event.eventDate, existing);
+  });
+
+  // Events for selected date
+  const selectedDateEvents = selectedDate ? (eventsByDate.get(selectedDate) ?? []) : [];
+
+  const goToPrevMonth = () => {
+    setCurrentMonth((prev) => {
+      if (prev.month === 0) return { year: prev.year - 1, month: 11 };
+      return { year: prev.year, month: prev.month - 1 };
+    });
+  };
+
+  const goToNextMonth = () => {
+    setCurrentMonth((prev) => {
+      if (prev.month === 11) return { year: prev.year + 1, month: 0 };
+      return { year: prev.year, month: prev.month + 1 };
+    });
+  };
+
+  const goToToday = () => {
+    const now = new Date();
+    setCurrentMonth({ year: now.getFullYear(), month: now.getMonth() });
+    setSelectedDate(today);
+  };
 
   return (
     <div className="page-fade min-h-screen bg-[#f4f3ee] pb-24">
@@ -62,7 +90,39 @@ export function CalendarTab({ userId }: CalendarTabProps) {
       </div>
 
       {/* Content */}
-      <div className="mx-auto max-w-2xl px-4 py-6">
+      <div className="mx-auto max-w-2xl px-4 py-6 space-y-6">
+        {/* Month Calendar Grid */}
+        <MonthCalendar
+          year={currentMonth.year}
+          month={currentMonth.month}
+          eventsByDate={eventsByDate}
+          selectedDate={selectedDate}
+          onSelectDate={setSelectedDate}
+          onPrevMonth={goToPrevMonth}
+          onNextMonth={goToNextMonth}
+          onToday={goToToday}
+          today={today}
+        />
+
+        {/* Selected Day's Events */}
+        {selectedDate && selectedDateEvents.length > 0 && (
+          <div>
+            <h2 className="t-strong text-[#4a4036] mb-3">
+              {formatDateThai(selectedDate)}
+            </h2>
+            <div className="space-y-2">
+              {selectedDateEvents.map((event) => (
+                <EventCard
+                  key={event.id}
+                  event={event}
+                  onClick={() => setSelectedEvent(event)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Empty State */}
         {!hasEvents && (
           <div className="text-center py-12">
             <Calendar size={48} className="mx-auto text-[#e0d8cc] mb-4" />
@@ -74,57 +134,6 @@ export function CalendarTab({ userId }: CalendarTabProps) {
               <br />
               Send a message in LINE to add a reminder
             </p>
-          </div>
-        )}
-
-        {/* Today */}
-        {todayEvents.length > 0 && (
-          <div className="mb-6">
-            <h2 className="t-strong text-[#4a4036] mb-3">วันนี้</h2>
-            <div className="space-y-2">
-              {todayEvents.map((event) => (
-                <EventCard
-                  key={event.id}
-                  event={event}
-                  onClick={() => setSelectedEvent(event)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Tomorrow */}
-        {tomorrowEvents.length > 0 && (
-          <div className="mb-6">
-            <h2 className="t-strong text-[#4a4036] mb-3">
-              พรุ่งนี้ ({formatDateThai(tomorrow)})
-            </h2>
-            <div className="space-y-2">
-              {tomorrowEvents.map((event) => (
-                <EventCard
-                  key={event.id}
-                  event={event}
-                  onClick={() => setSelectedEvent(event)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Future */}
-        {futureEvents.length > 0 && (
-          <div className="mb-6">
-            <h2 className="t-strong text-[#4a4036] mb-3">กำหนดการต่อไป</h2>
-            <div className="space-y-2">
-              {futureEvents.map((event) => (
-                <EventCard
-                  key={event.id}
-                  event={event}
-                  onClick={() => setSelectedEvent(event)}
-                  showDate
-                />
-              ))}
-            </div>
           </div>
         )}
       </div>
@@ -144,13 +153,151 @@ export function CalendarTab({ userId }: CalendarTabProps) {
   );
 }
 
+interface MonthCalendarProps {
+  year: number;
+  month: number; // 0-indexed
+  eventsByDate: Map<string, CalendarEvent[]>;
+  selectedDate: string | null;
+  onSelectDate: (date: string) => void;
+  onPrevMonth: () => void;
+  onNextMonth: () => void;
+  onToday: () => void;
+  today: string;
+}
+
+function MonthCalendar({
+  year,
+  month,
+  eventsByDate,
+  selectedDate,
+  onSelectDate,
+  onPrevMonth,
+  onNextMonth,
+  onToday,
+  today,
+}: MonthCalendarProps) {
+  const thaiMonths = [
+    "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
+    "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
+  ];
+
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const daysInMonth = lastDay.getDate();
+  const startDayOfWeek = firstDay.getDay(); // 0 = Sunday
+
+  // Build calendar grid (6 weeks max)
+  const calendarDays: (number | null)[] = [];
+
+  // Leading empty cells
+  for (let i = 0; i < startDayOfWeek; i++) {
+    calendarDays.push(null);
+  }
+
+  // Days of the month
+  for (let day = 1; day <= daysInMonth; day++) {
+    calendarDays.push(day);
+  }
+
+  const dayOfWeekLabels = ["อา", "จ", "อ", "พ", "พฤ", "ศ", "ส"];
+
+  return (
+    <div className="rounded-2xl bg-[#fbfaf6] border border-[#e0d8cc] p-4">
+      {/* Month/Year Header */}
+      <div className="flex items-center justify-between mb-4">
+        <button
+          onClick={onPrevMonth}
+          className="flex h-8 w-8 items-center justify-center rounded-full text-[#b0a396] transition-colors hover:bg-[#f4f3ee]"
+        >
+          <ChevronLeft size={20} />
+        </button>
+        <div className="text-center">
+          <h3 className="t-strong text-[#4a4036]">
+            {thaiMonths[month]} {year + 543}
+          </h3>
+        </div>
+        <button
+          onClick={onNextMonth}
+          className="flex h-8 w-8 items-center justify-center rounded-full text-[#b0a396] transition-colors hover:bg-[#f4f3ee]"
+        >
+          <ChevronRight size={20} />
+        </button>
+      </div>
+
+      {/* Today Button */}
+      <div className="flex justify-center mb-3">
+        <button
+          onClick={onToday}
+          className="t-caption px-3 py-1 rounded-full bg-[#9b869c]/10 text-[#9b869c] hover:bg-[#9b869c]/20 transition-colors"
+        >
+          วันนี้
+        </button>
+      </div>
+
+      {/* Day of Week Labels */}
+      <div className="grid grid-cols-7 gap-1 mb-2">
+        {dayOfWeekLabels.map((label, idx) => (
+          <div
+            key={idx}
+            className="t-caption text-center text-[#b0a396] font-bold"
+          >
+            {label}
+          </div>
+        ))}
+      </div>
+
+      {/* Calendar Grid */}
+      <div className="grid grid-cols-7 gap-1">
+        {calendarDays.map((day, idx) => {
+          if (day === null) {
+            return <div key={`empty-${idx}`} className="aspect-square" />;
+          }
+
+          const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          const isToday = dateStr === today;
+          const isSelected = dateStr === selectedDate;
+          const hasEvents = eventsByDate.has(dateStr);
+          const eventCount = eventsByDate.get(dateStr)?.length ?? 0;
+
+          return (
+            <button
+              key={day}
+              onClick={() => onSelectDate(dateStr)}
+              className={`aspect-square rounded-lg flex flex-col items-center justify-center transition-all relative ${
+                isSelected
+                  ? "bg-[#9b869c] text-white"
+                  : isToday
+                    ? "bg-[#9b869c]/20 text-[#9b869c] font-bold"
+                    : "text-[#4a4036] hover:bg-[#f4f3ee]"
+              }`}
+            >
+              <span className="t-body">{day}</span>
+              {hasEvents && (
+                <div className="flex gap-0.5 mt-0.5">
+                  {Array.from({ length: Math.min(eventCount, 3) }).map((_, i) => (
+                    <div
+                      key={i}
+                      className={`w-1 h-1 rounded-full ${
+                        isSelected ? "bg-white" : "bg-[#9b869c]"
+                      }`}
+                    />
+                  ))}
+                </div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 interface EventCardProps {
   event: CalendarEvent;
   onClick: () => void;
-  showDate?: boolean;
 }
 
-function EventCard({ event, onClick, showDate }: EventCardProps) {
+function EventCard({ event, onClick }: EventCardProps) {
   const timeStr = event.eventTime ? event.eventTime.slice(0, 5) : null;
 
   return (
@@ -178,7 +325,6 @@ function EventCard({ event, onClick, showDate }: EventCardProps) {
             </p>
           )}
           <p className="t-caption text-[#b0a396] mt-2">
-            {showDate && `${formatDateThai(event.eventDate)} • `}
             {timeStr ? `${timeStr} น.` : "ตลอดวัน"}
           </p>
         </div>
@@ -285,5 +431,5 @@ function formatDateThai(dateStr: string): string {
     "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
     "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
   ];
-  return `${day} ${thaiMonths[month - 1]}`;
+  return `${day} ${thaiMonths[month - 1]} ${year + 543}`;
 }
