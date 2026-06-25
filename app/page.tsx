@@ -48,6 +48,7 @@ export default function HomePage() {
     <HomeScreen
       displayName={profile?.displayName}
       pictureUrl={profile?.pictureUrl}
+      userId={profile?.userId}
     />
   );
 }

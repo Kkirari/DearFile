@@ -29,6 +29,7 @@ import {
 import { after } from "next/server";
 import {
   answerBubble,
+  calendarEventCreatedBubble,
   captureResultBubble,
   examplesBubble,
   fetchGroupSummary,
@@ -78,6 +79,13 @@ import {
 import { checkAndIncrementAsk } from "@/lib/rate-limit";
 import { routeIntent } from "@/lib/intent";
 import { invalidatePreviews } from "@/lib/previews-cache";
+import {
+  calculateRemindAt,
+  formatDateThai,
+  formatTimeThai,
+  parseCalendarCommand,
+} from "@/lib/calendar";
+import { insertCalendarEvent } from "@/lib/db";
 import {
   addMember,
   createGroupWorkspace,
@@ -1193,6 +1201,19 @@ async function handleMessageEvent(
     if (msg.type === "text") {
       const text = msg.text ?? "";
 
+      // Calendar commands are DM-only. Politely inform group users.
+      const calEvent = await parseCalendarCommand(text, userId);
+      if (calEvent) {
+        return [
+          {
+            type: "text",
+            text:
+              "📅 ปฏิทินใช้ได้เฉพาะแชทส่วนตัวนะ ลองส่งข้อความมาที่ DM\n" +
+              "Calendar works in DM only. Please message me directly to add events.",
+          },
+        ];
+      }
+
       // Kick command — bot leaves the group with a witty one-liner.
       // Reply first (so the user sees it before the bot disappears), then
       // call the LINE leave API. The `leave` webhook event fired by LINE
@@ -1321,6 +1342,39 @@ async function handleMessageEvent(
 
     // On-demand daily recap: "/summary" · "สรุป" · "recap" · "สรุปวันนี้".
     if (isSummaryCommand(raw)) return handleSummaryCommand(userId);
+
+    // Calendar command: parse natural language date/time and save event
+    const calEvent = await parseCalendarCommand(raw, userId);
+    if (calEvent) {
+      try {
+        await insertCalendarEvent({
+          userId,
+          title: calEvent.title,
+          description: calEvent.description,
+          eventDate: calEvent.date,
+          eventTime: calEvent.time,
+          remindAt: calculateRemindAt(calEvent.date, calEvent.time),
+        });
+        return [
+          calendarEventCreatedBubble({
+            title: calEvent.title,
+            date: formatDateThai(calEvent.date),
+            time: calEvent.time ? formatTimeThai(calEvent.time) : null,
+            liffUrl: liffUrl({ tab: "calendar" }),
+          }),
+        ];
+      } catch (err) {
+        console.error("[line/webhook] calendar event insert failed:", err);
+        return [
+          {
+            type: "text",
+            text:
+              "⚠️ บันทึกปฏิทินไม่สำเร็จ ลองใหม่อีกครั้งนะ\n" +
+              "Couldn't save calendar event — please try again.",
+          },
+        ];
+      }
+    }
 
     // Capture: an explicit /note … or any URL → save to the Timeline. Ingest
     // synchronously (a durable `pending` row), then process + deliver the summary

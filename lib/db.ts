@@ -595,3 +595,127 @@ export async function deleteMcpToken(userId: string, tokenHash: string): Promise
     [userId, tokenHash],
   );
 }
+
+// ── calendar_events (Phase 1 reminder system) ──────────────────────────────
+
+export interface CalendarEvent {
+  id: string;
+  userId: string;
+  title: string;
+  description: string | null;
+  eventDate: string;      // YYYY-MM-DD
+  eventTime: string | null; // HH:MM:SS
+  remindAt: string;       // ISO timestamp
+  status: "pending" | "sent" | "cancelled";
+  googleEventId: string | null;
+  createdAt: string;
+  sentAt: string | null;
+}
+
+interface CalendarEventRow {
+  id: string;
+  user_id: string;
+  title: string;
+  description: string | null;
+  event_date: string | Date;
+  event_time: string | null;
+  remind_at: string | Date;
+  status: string;
+  google_event_id: string | null;
+  created_at: string | Date;
+  sent_at: string | Date | null;
+}
+
+function mapCalendarEvent(r: CalendarEventRow): CalendarEvent {
+  return {
+    id: r.id,
+    userId: r.user_id,
+    title: r.title,
+    description: r.description,
+    eventDate: typeof r.event_date === "string" ? r.event_date : r.event_date.toISOString().split("T")[0],
+    eventTime: r.event_time,
+    remindAt: toIso(r.remind_at)!,
+    status: r.status as "pending" | "sent" | "cancelled",
+    googleEventId: r.google_event_id,
+    createdAt: toIso(r.created_at)!,
+    sentAt: toIso(r.sent_at),
+  };
+}
+
+/** Insert a new calendar event. Returns the event id. */
+export async function insertCalendarEvent(input: {
+  userId: string;
+  title: string;
+  description?: string | null;
+  eventDate: string;    // YYYY-MM-DD
+  eventTime?: string | null;  // HH:MM
+  remindAt: Date;
+}): Promise<string> {
+  const rows = await q<{ id: string }>(
+    `INSERT INTO calendar_events (user_id, title, description, event_date, event_time, remind_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id`,
+    [
+      input.userId,
+      input.title,
+      input.description ?? null,
+      input.eventDate,
+      input.eventTime ?? null,
+      input.remindAt.toISOString(),
+    ],
+  );
+  return rows[0].id;
+}
+
+/** Fetch a single calendar event by id. */
+export async function getCalendarEvent(id: string): Promise<CalendarEvent | null> {
+  const rows = await q<CalendarEventRow>(
+    `SELECT * FROM calendar_events WHERE id = $1`,
+    [id],
+  );
+  return rows[0] ? mapCalendarEvent(rows[0]) : null;
+}
+
+/** List all upcoming calendar events for a user, newest event_date first. */
+export async function listCalendarEvents(userId: string): Promise<CalendarEvent[]> {
+  const rows = await q<CalendarEventRow>(
+    `SELECT * FROM calendar_events
+     WHERE user_id = $1 AND status != 'cancelled'
+     ORDER BY event_date ASC, event_time ASC NULLS LAST
+     LIMIT 100`,
+    [userId],
+  );
+  return rows.map(mapCalendarEvent);
+}
+
+/** List events whose remind_at is <= now and status = pending. */
+export async function listDueCalendarEvents(now: Date): Promise<CalendarEvent[]> {
+  const rows = await q<CalendarEventRow>(
+    `SELECT * FROM calendar_events
+     WHERE status = 'pending' AND remind_at <= $1
+     ORDER BY remind_at ASC
+     LIMIT 100`,
+    [now.toISOString()],
+  );
+  return rows.map(mapCalendarEvent);
+}
+
+/** Mark a calendar event as sent. */
+export async function markCalendarEventSent(id: string): Promise<void> {
+  await q(
+    `UPDATE calendar_events SET status = 'sent', sent_at = now()
+     WHERE id = $1`,
+    [id],
+  );
+}
+
+/** Cancel (soft-delete) a calendar event. */
+export async function cancelCalendarEvent(userId: string, id: string): Promise<boolean> {
+  const rows = await q<{ id: string }>(
+    `UPDATE calendar_events SET status = 'cancelled'
+     WHERE id = $1 AND user_id = $2
+     RETURNING id`,
+    [id, userId],
+  );
+  return rows.length > 0;
+}

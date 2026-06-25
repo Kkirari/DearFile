@@ -199,14 +199,16 @@ export async function fetchGroupSummary(
  */
 export async function fetchUserProfile(
   userId: string,
-): Promise<{ userId: string; displayName: string; pictureUrl?: string; statusMessage?: string } | null> {
+): Promise<{
+  userId: string;
+  displayName: string;
+  pictureUrl?: string;
+  statusMessage?: string;
+} | null> {
   try {
-    const res = await fetch(
-      `https://api.line.me/v2/bot/profile/${userId}`,
-      {
-        headers: { Authorization: `Bearer ${accessToken()}` },
-      },
-    );
+    const res = await fetch(`https://api.line.me/v2/bot/profile/${userId}`, {
+      headers: { Authorization: `Bearer ${accessToken()}` },
+    });
     if (!res.ok) return null;
     return res.json() as Promise<{
       userId: string;
@@ -244,7 +246,7 @@ export const GROUP_LEAVE_COMMANDS: readonly string[] = [
 ];
 
 /** Reply sent back to the group right before the bot leaves. */
-export const GROUP_LEAVE_REPLY_TEXT = "พริ๊ๆจะทำจริงๆหรอครับ 😢";
+export const GROUP_LEAVE_REPLY_TEXT = "แต่สิ่งที่เหลือในใจยังอยู่.... 😢";
 
 export function isGroupLeaveCommand(text: string): boolean {
   const t = (text ?? "")
@@ -914,8 +916,14 @@ export function folderCreatedBubble(
   workspaceName: string,
   liffUrl: string,
 ): LineFlexMessage {
-  const truncatedFolder = truncateMiddle(folderName, LINE_FLEX_SHORT_TEXT_CHARS);
-  const truncatedWorkspace = truncateMiddle(workspaceName, LINE_FLEX_SHORT_TEXT_CHARS);
+  const truncatedFolder = truncateMiddle(
+    folderName,
+    LINE_FLEX_SHORT_TEXT_CHARS,
+  );
+  const truncatedWorkspace = truncateMiddle(
+    workspaceName,
+    LINE_FLEX_SHORT_TEXT_CHARS,
+  );
 
   return {
     type: "flex",
@@ -1559,3 +1567,201 @@ export function greetingBubble(liffUrl: string): LineFlexMessage {
     },
   };
 }
+
+/**
+ * Confirmation bubble when a calendar event is created — green checkmark, shows
+ * title/date/time, button to open calendar tab in LIFF.
+ */
+export function calendarEventCreatedBubble(opts: {
+  title: string;
+  date: string;      // Thai formatted: "6 ก.ค. 2026"
+  time: string | null; // "14:30 น." or null
+  liffUrl: string;
+}): LineFlexMessage {
+  const timeText = opts.time ? `\nเวลา ${opts.time}` : "\n(ตลอดวัน / All-day)";
+  return {
+    type: "flex",
+    altText: `✅ เพิ่มปฏิทิน: ${opts.title}`,
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      body: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          {
+            type: "box",
+            layout: "horizontal",
+            contents: [
+              {
+                type: "text",
+                text: "✅",
+                size: "xl",
+                flex: 0,
+                margin: "none",
+              },
+              {
+                type: "box",
+                layout: "vertical",
+                contents: [
+                  {
+                    type: "text",
+                    text: "เพิ่มปฏิทินสำเร็จ",
+                    weight: "bold",
+                    size: "md",
+                    color: "#4a4036",
+                  },
+                  {
+                    type: "text",
+                    text: "Calendar event added",
+                    size: "xs",
+                    color: "#b0a396",
+                    margin: "xs",
+                  },
+                ],
+                margin: "md",
+              },
+            ],
+          },
+          {
+            type: "separator",
+            margin: "lg",
+          },
+          {
+            type: "box",
+            layout: "vertical",
+            margin: "lg",
+            contents: [
+              {
+                type: "text",
+                text: opts.title,
+                size: "lg",
+                weight: "bold",
+                color: "#4a4036",
+                wrap: true,
+              },
+              {
+                type: "text",
+                text: `📅 ${opts.date}${timeText}`,
+                size: "sm",
+                color: "#b0a396",
+                margin: "md",
+                wrap: true,
+              },
+            ],
+          },
+        ],
+        paddingAll: "20px",
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: BRAND_MAUVE,
+            height: "sm",
+            action: {
+              type: "uri",
+              label: "เปิดปฏิทิน / Open Calendar",
+              uri: opts.liffUrl,
+            },
+          },
+        ],
+        paddingAll: "16px",
+        paddingTop: "0px",
+      },
+    },
+  };
+}
+
+/**
+ * Reminder push message sent on the event date/time — bell emoji, shows event
+ * title/description/date. No action button needed (reminder is delivered).
+ */
+export function calendarReminderBubble(opts: {
+  title: string;
+  description: string | null;
+  date: string;      // YYYY-MM-DD
+  time: string | null; // HH:MM:SS or null
+}): LineFlexMessage {
+  const [year, month, day] = opts.date.split("-");
+  const thaiMonths = [
+    "ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
+    "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค.",
+  ];
+  const dateFormatted = `${parseInt(day)} ${thaiMonths[parseInt(month) - 1]} ${year}`;
+  const timeFormatted = opts.time ? opts.time.slice(0, 5) + " น." : "ตลอดวัน";
+
+  const descriptionBox = opts.description
+    ? [
+        {
+          type: "text" as const,
+          text: opts.description,
+          size: "sm" as const,
+          color: "#b0a396",
+          wrap: true,
+          margin: "md" as const,
+        },
+      ]
+    : [];
+
+  return {
+    type: "flex",
+    altText: `🔔 เตือนความจำ: ${opts.title}`,
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      body: {
+        type: "box",
+        layout: "vertical",
+        contents: [
+          {
+            type: "text",
+            text: "🔔 เตือนความจำ",
+            size: "lg",
+            weight: "bold",
+            color: BRAND_MAUVE,
+          },
+          {
+            type: "text",
+            text: "Reminder",
+            size: "xs",
+            color: "#b0a396",
+            margin: "xs",
+          },
+          {
+            type: "separator",
+            margin: "lg",
+          },
+          {
+            type: "box",
+            layout: "vertical",
+            margin: "lg",
+            contents: [
+              {
+                type: "text",
+                text: opts.title,
+                size: "xl",
+                weight: "bold",
+                color: "#4a4036",
+                wrap: true,
+              },
+              ...descriptionBox,
+              {
+                type: "text",
+                text: `📅 ${dateFormatted} • ${timeFormatted}`,
+                size: "sm",
+                color: "#b0a396",
+                margin: "md",
+              },
+            ],
+          },
+        ],
+        paddingAll: "20px",
+      },
+    },
+  };
+}
+
