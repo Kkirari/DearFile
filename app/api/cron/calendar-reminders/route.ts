@@ -2,8 +2,17 @@
  * Calendar reminders cron — checks every 10 minutes for due events and sends
  * LINE push notifications.
  *
- * Runs: `*\/10 * * * *` (every 10 minutes) — backslash so the cron step value
- * doesn't close this block comment.
+ * NOT SCHEDULED. The 10-minute cadence this needs (`*` `/10 * * * *`) is a Pro
+ * feature — Vercel Hobby allows daily crons only, and leaving it in vercel.json
+ * made every deploy fail config validation. The entry was removed so deploys can
+ * land; adding events and viewing the calendar still work, only the automatic
+ * push reminder is off.
+ *
+ * Still callable by hand while it's dormant:
+ *   GET /api/cron/calendar-reminders?token=<ADMIN_TOKEN>
+ *
+ * To re-enable: put the entry back in vercel.json (needs Pro), or point an
+ * external scheduler at the URL above.
  *
  *   GET /api/cron/calendar-reminders
  *
