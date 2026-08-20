@@ -2,7 +2,8 @@
  * Calendar reminders cron — checks every 10 minutes for due events and sends
  * LINE push notifications.
  *
- * Runs: `*/10 * * * *` (every 10 minutes)
+ * Runs: `*\/10 * * * *` (every 10 minutes) — backslash so the cron step value
+ * doesn't close this block comment.
  *
  *   GET /api/cron/calendar-reminders
  *

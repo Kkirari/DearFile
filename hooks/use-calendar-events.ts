@@ -16,13 +16,15 @@ export function useCalendarEvents(userId: string | null) {
       return;
     }
 
+    // Capture after the guard — narrowing doesn't survive into the nested closure.
+    const uid = userId;
     let mounted = true;
 
     async function load() {
       try {
         setLoading(true);
         setError(null);
-        const res = await fetch(`/api/calendar/events?userId=${encodeURIComponent(userId)}`);
+        const res = await fetch(`/api/calendar/events?userId=${encodeURIComponent(uid)}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         if (mounted) {
