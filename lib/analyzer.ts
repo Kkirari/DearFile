@@ -25,6 +25,12 @@ export interface FileAnalysis {
   date: string | null;
   keywords: string[];          // mixed Thai + English for search
   suggested_filename: string;
+  /**
+   * true = the file's ORIGINAL name already describes it well, so callers must
+   * skip the rename and keep the uploaded name. Every other field is still
+   * filled in — they power search and the AI folders.
+   */
+  keep_original: boolean;
   via: "metadata" | "claude" | "fallback";
 }
 
@@ -94,11 +100,25 @@ JSON FIELDS:
                 terms a user might search by. Example: ["ใบเสร็จ","กาแฟ","starbucks","receipt"].
   suggested_filename — "[category]_[subject]_[DD-M-YY].[ext]" or "[category]_[subject].[ext]" if
                 no date. Lowercase a-z, digits, hyphens, underscores only.
+  keep_original — true ONLY when the ORIGINAL FILENAME given to you already describes the file's
+                real content well enough that renaming it would LOSE information — i.e. a human
+                typed it. Thai or English both count.
+                  true:  "สัญญาเช่าบ้าน-2569.pdf", "ใบเสร็จค่าน้ำ-มกราคม.pdf",
+                         "Q2-sales-report-final.docx", "โจทย์เลข-บทที่3.pdf"
+                  false: camera / app / bot noise — "IMG_0001.jpg", "DCIM_4567.png",
+                         "image_1755648000000.jpg", "Scan_20260101.pdf", "20260820_143022.jpg",
+                         "untitled.docx", "document (3).pdf", "photo.png"
+                  false: also when the name is generic, is only digits, or contradicts what you
+                         actually see in the content.
+                When unsure, return false — a wrong rename is easier to notice than a bad name
+                that sticks.
 
 STRICT RULES (any violation = invalid response):
 - NEVER include a person's name, a pet's name, or any identifiable individual's name.
 - subject + suggested_filename: only a-z, 0-9, "-" and "_" (in filename) — no spaces, no Thai.
 - keywords MUST be a JSON array of plain strings.
+- keep_original MUST be a boolean. Fill in suggested_filename and every other field normally even
+  when keep_original is true — they power search regardless of what the file ends up called.
 - Return ONLY the JSON object. No markdown fences, no commentary, no leading text.`;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -149,6 +169,32 @@ function isMeaningfulExifDescription(s: string): boolean {
   return trimmed.length >= 3 && !MEANINGLESS_EXIF_PATTERNS.some((re) => re.test(trimmed));
 }
 
+/**
+ * Recover the name the file was uploaded under. Every upload path writes the key
+ * as `{prefix}/{Date.now()}-{filename}`, so stripping that timestamp gives the
+ * original name back. `\d{10,}` so a real name starting with a year ("2026-q2.pdf")
+ * survives.
+ */
+function originalNameFromKey(s3Key: string): string {
+  return (s3Key.split("/").pop() ?? "").replace(/^\d{10,}-/, "");
+}
+
+/**
+ * Does the uploaded filename already say what the file is? Camera and app noise
+ * (IMG_4821, DCIM0032, Scan_001, 20260820_143022) says nothing; a name a human
+ * typed ("ใบเสร็จค่าน้ำ-มกราคม") says plenty and is worth keeping — it's also the
+ * highest-weighted field in search.
+ *
+ * Reuses the EXIF junk patterns. Stripping the extension first is load-bearing,
+ * not cosmetic: LINE names every image/video/audio message `image_1755678901234.jpg`
+ * (deriveFilename in the webhook), and the junk pattern ends in `\d*$` — the ".jpg"
+ * would block the match and every LINE photo would falsely look meaningful.
+ */
+function looksMeaningfulFilename(name: string | undefined): boolean {
+  const base = (name ?? "").trim().replace(/\.[^.]+$/, "").trim();
+  return isMeaningfulExifDescription(base);
+}
+
 function guessCategory(text: string): string {
   const t = text.toLowerCase();
   if (/receipt|ใบเสร็จ|payment receipt|paid/.test(t)) return "receipt";
@@ -196,11 +242,14 @@ async function callClaude(
   content: string | ContentBlock[],
   ext: string,
   knownDate: string | null,
+  originalName: string,
   opts?: { anthropicApiKey?: string },
 ): Promise<FileAnalysis> {
+  const nameLine = originalName ? `\nOriginal filename: ${originalName}` : "";
+
   const userText =
     typeof content === "string"
-      ? `File type: .${ext}${knownDate ? `\nKnown date: ${knownDate}` : ""}\n\nContent:\n${content}`
+      ? `File type: .${ext}${nameLine}${knownDate ? `\nKnown date: ${knownDate}` : ""}\n\nContent:\n${content}`
       : undefined;
 
   const messages =
@@ -213,7 +262,7 @@ async function callClaude(
               ...content,
               {
                 type: "text" as const,
-                text: `File extension: .${ext}${knownDate ? `\nEXIF date: ${knownDate}` : ""}\n\nAnalyze and return JSON as instructed.`,
+                text: `File extension: .${ext}${nameLine}${knownDate ? `\nEXIF date: ${knownDate}` : ""}\n\nAnalyze and return JSON as instructed.`,
               },
             ] as ContentBlock[],
           },
@@ -237,6 +286,7 @@ async function callClaude(
       date: knownDate,
       keywords: [],
       suggested_filename: buildFilename("document", "untitled", knownDate, ext),
+      keep_original: false,
       via: "fallback",
     };
   }
@@ -249,6 +299,11 @@ async function callClaude(
   const category = parsed.category ?? "document";
   const subject = parsed.subject ?? "untitled";
 
+  // Trust the model only when the name could plausibly be human-written. Guards
+  // against it being charmed by "image_1755648000000.jpg" into keeping camera noise.
+  const keepOriginal =
+    parsed.keep_original === true && looksMeaningfulFilename(originalName);
+
   return {
     category,
     type: parsed.type ?? "general",
@@ -256,14 +311,21 @@ async function callClaude(
     detail: parsed.detail ?? "",
     date,
     keywords: Array.isArray(parsed.keywords) ? parsed.keywords.filter((k) => typeof k === "string" && k.trim().length > 0).slice(0, 12) : [],
-    suggested_filename: parsed.suggested_filename ?? buildFilename(category, subject, date, ext),
+    // Keeping the original name is expressed AS the suggestion, not by skipping the
+    // rename: callers derive IndexEntry.filename from the final key, and the raw key
+    // still carries the "{timestamp}-" upload prefix. Renaming to the original name
+    // strips it; skipping the rename would surface "1755648000000-สัญญาเช่าบ้าน.pdf".
+    suggested_filename: keepOriginal
+      ? originalName
+      : (parsed.suggested_filename ?? buildFilename(category, subject, date, ext)),
+    keep_original: keepOriginal,
     via: "claude",
   };
 }
 
 // ── Image (jpg/png) ───────────────────────────────────────────────────────────
 
-async function analyzeImage(buffer: Buffer, ext: string, opts?: { anthropicApiKey?: string }): Promise<FileAnalysis> {
+async function analyzeImage(buffer: Buffer, ext: string, originalName: string, opts?: { anthropicApiKey?: string }): Promise<FileAnalysis> {
   // Dynamic import — exifr is ESM
   const { default: exifr } = await import("exifr");
 
@@ -296,6 +358,8 @@ async function analyzeImage(buffer: Buffer, ext: string, opts?: { anthropicApiKe
   // Junk-description filenames (IMG_0001, DCIM_4567, "Camera Photo") fall through
   // to Claude so the file actually gets named for its content, not its EXIF noise.
   if (exifDate && isMeaningfulExifDescription(description)) {
+    // No model on this path, so judge the uploaded name with the same junk patterns.
+    const keepOriginal = looksMeaningfulFilename(originalName);
     return {
       category: "photo",
       type: "general",
@@ -303,7 +367,10 @@ async function analyzeImage(buffer: Buffer, ext: string, opts?: { anthropicApiKe
       detail: description,
       date: exifDate,
       keywords: description.split(/\s+/).filter((w) => w.length > 1).slice(0, 6),
-      suggested_filename: buildFilename("photo", description, exifDate, ext),
+      suggested_filename: keepOriginal
+        ? originalName
+        : buildFilename("photo", description, exifDate, ext),
+      keep_original: keepOriginal,
       via: "metadata",
     };
   }
@@ -318,6 +385,7 @@ async function analyzeImage(buffer: Buffer, ext: string, opts?: { anthropicApiKe
       date: exifDate,
       keywords: [],
       suggested_filename: buildFilename("photo", "untitled-photo", exifDate, ext),
+      keep_original: false,
       via: "fallback",
     };
   }
@@ -334,12 +402,12 @@ async function analyzeImage(buffer: Buffer, ext: string, opts?: { anthropicApiKe
     },
   ];
 
-  return callClaude(content, ext, exifDate, opts);
+  return callClaude(content, ext, exifDate, originalName, opts);
 }
 
 // ── PDF ───────────────────────────────────────────────────────────────────────
 
-async function analyzePdf(buffer: Buffer, opts?: { anthropicApiKey?: string }): Promise<FileAnalysis> {
+async function analyzePdf(buffer: Buffer, originalName: string, opts?: { anthropicApiKey?: string }): Promise<FileAnalysis> {
   // pdf-parse v1 CJS — in serverExternalPackages so bundler skips it (no test-file issue)
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const pdfParse = require("pdf-parse") as (
@@ -375,6 +443,7 @@ async function analyzePdf(buffer: Buffer, opts?: { anthropicApiKey?: string }): 
   if (title.length > 2) {
     const category = guessCategory(`${title} ${subject}`);
     const kw = `${title} ${subject}`.split(/[\s,;]+/).filter((w) => w.length > 1).slice(0, 8);
+    const keepOriginal = looksMeaningfulFilename(originalName);
     return {
       category,
       type: "general",
@@ -382,19 +451,22 @@ async function analyzePdf(buffer: Buffer, opts?: { anthropicApiKey?: string }): 
       detail: [author && `Author: ${author}`, subject].filter(Boolean).join(" · ") || "Digital PDF",
       date,
       keywords: kw,
-      suggested_filename: buildFilename(category, title, date, "pdf"),
+      suggested_filename: keepOriginal
+        ? originalName
+        : buildFilename(category, title, date, "pdf"),
+      keep_original: keepOriginal,
       via: "metadata",
     };
   }
 
   // Use extracted text as fallback
   const text = (data.text ?? "").slice(0, MAX_TEXT_CHARS_FOR_AI);
-  return callClaude(text || "No readable text found", "pdf", date, opts);
+  return callClaude(text || "No readable text found", "pdf", date, originalName, opts);
 }
 
 // ── DOCX ──────────────────────────────────────────────────────────────────────
 
-async function analyzeDocx(buffer: Buffer, opts?: { anthropicApiKey?: string }): Promise<FileAnalysis> {
+async function analyzeDocx(buffer: Buffer, originalName: string, opts?: { anthropicApiKey?: string }): Promise<FileAnalysis> {
   const { default: JSZip } = await import("jszip");
 
   const zip = await JSZip.loadAsync(buffer);
@@ -418,6 +490,7 @@ async function analyzeDocx(buffer: Buffer, opts?: { anthropicApiKey?: string }):
   if (title.length > 2) {
     const category = guessCategory(`${title} ${description}`);
     const kw = `${title} ${description}`.split(/[\s,;]+/).filter((w) => w.length > 1).slice(0, 8);
+    const keepOriginal = looksMeaningfulFilename(originalName);
     return {
       category,
       type: "general",
@@ -425,7 +498,10 @@ async function analyzeDocx(buffer: Buffer, opts?: { anthropicApiKey?: string }):
       detail: description || "Word document",
       date,
       keywords: kw,
-      suggested_filename: buildFilename(category, title, date, "docx"),
+      suggested_filename: keepOriginal
+        ? originalName
+        : buildFilename(category, title, date, "docx"),
+      keep_original: keepOriginal,
       via: "metadata",
     };
   }
@@ -433,7 +509,7 @@ async function analyzeDocx(buffer: Buffer, opts?: { anthropicApiKey?: string }):
   // Extract document text for Claude
   const docXml = (await zip.file("word/document.xml")?.async("string")) ?? "";
   const text = stripXmlTags(docXml).slice(0, MAX_TEXT_CHARS_FOR_AI);
-  return callClaude(text || "No readable text found", "docx", date, opts);
+  return callClaude(text || "No readable text found", "docx", date, originalName, opts);
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -446,13 +522,14 @@ export async function analyzeFile(s3Key: string, userId?: string): Promise<FileA
   }
 
   const buffer = await downloadFromS3(s3Key);
+  const originalName = originalNameFromKey(s3Key);
   const opts = userId
     ? { anthropicApiKey: (await getUserKeys(userId)).anthropic }
     : undefined;
 
-  if (ext === "jpg" || ext === "jpeg" || ext === "png") return analyzeImage(buffer, ext, opts);
-  if (ext === "pdf") return analyzePdf(buffer, opts);
-  if (ext === "docx") return analyzeDocx(buffer, opts);
+  if (ext === "jpg" || ext === "jpeg" || ext === "png") return analyzeImage(buffer, ext, originalName, opts);
+  if (ext === "pdf") return analyzePdf(buffer, originalName, opts);
+  if (ext === "docx") return analyzeDocx(buffer, originalName, opts);
 
   throw new Error(`Unhandled extension: .${ext}`);
 }

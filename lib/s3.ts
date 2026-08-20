@@ -21,6 +21,15 @@ export const s3 = new S3Client({
 
 export const BUCKET = process.env.AWS_BUCKET_NAME!;
 
+async function s3ObjectExists(key: string): Promise<boolean> {
+  try {
+    await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: key }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Rename an S3 object by copying to a new key then deleting the old one.
  * Preserves the folder prefix (e.g. "uploads/" or "folders/{id}/").
@@ -29,10 +38,23 @@ export const BUCKET = process.env.AWS_BUCKET_NAME!;
 export async function renameS3Object(oldKey: string, newFilename: string): Promise<string> {
   const slash = oldKey.lastIndexOf("/");
   const prefix = slash >= 0 ? oldKey.slice(0, slash + 1) : "";
-  const newKey = prefix + newFilename;
+  let newKey = prefix + newFilename;
 
   // Skip if name is unchanged
   if (oldKey === newKey) return newKey;
+
+  // CopyObject overwrites silently, and the search index is keyed by S3 key — a
+  // collision destroys the earlier file AND its index entry. Two people dropping
+  // "รายงานประชุม.pdf" into the same group inbox is an ordinary Tuesday, and the
+  // analyzer now keeps good original names, so probe for a free suffix first.
+  // ponytail: linear probe capped at 20; a prefix this crowded is a different problem.
+  const dot = newFilename.lastIndexOf(".");
+  const stem = dot > 0 ? newFilename.slice(0, dot) : newFilename;
+  const ext = dot > 0 ? newFilename.slice(dot) : "";
+  for (let n = 2; n <= 20; n++) {
+    if (!(await s3ObjectExists(newKey))) break;
+    newKey = `${prefix}${stem}-${n}${ext}`;
+  }
 
   await s3.send(new CopyObjectCommand({
     Bucket:     BUCKET,
