@@ -24,13 +24,13 @@ export interface FileAnalysis {
   detail: string;              // one-line description
   date: string | null;
   keywords: string[];          // mixed Thai + English for search
-  suggested_filename: string;
   /**
-   * true = the file's ORIGINAL name already describes it well, so callers must
-   * skip the rename and keep the uploaded name. Every other field is still
-   * filled in — they power search and the AI folders.
+   * What to call the file. When the uploaded name already describes the content
+   * this is that name, unchanged — "keep it" is expressed as the suggestion
+   * rather than as a flag, because callers derive the display name from the
+   * final S3 key and the raw key still carries the "{timestamp}-" upload prefix.
    */
-  keep_original: boolean;
+  suggested_filename: string;
   via: "metadata" | "claude" | "fallback";
 }
 
@@ -100,18 +100,23 @@ JSON FIELDS:
                 terms a user might search by. Example: ["ใบเสร็จ","กาแฟ","starbucks","receipt"].
   suggested_filename — "[category]_[subject]_[DD-M-YY].[ext]" or "[category]_[subject].[ext]" if
                 no date. Lowercase a-z, digits, hyphens, underscores only.
-  keep_original — true ONLY when the ORIGINAL FILENAME given to you already describes the file's
-                real content well enough that renaming it would LOSE information — i.e. a human
-                typed it. Thai or English both count.
-                  true:  "สัญญาเช่าบ้าน-2569.pdf", "ใบเสร็จค่าน้ำ-มกราคม.pdf",
-                         "Q2-sales-report-final.docx", "โจทย์เลข-บทที่3.pdf"
-                  false: camera / app / bot noise — "IMG_0001.jpg", "DCIM_4567.png",
-                         "image_1755648000000.jpg", "Scan_20260101.pdf", "20260820_143022.jpg",
-                         "untitled.docx", "document (3).pdf", "photo.png"
-                  false: also when the name is generic, is only digits, or contradicts what you
-                         actually see in the content.
-                When unsure, return false — a wrong rename is easier to notice than a bad name
-                that sticks.
+  keep_original — Answer ONE factual question: did a HUMAN type this filename, or did a device
+                or app generate it? Do not judge whether the name is as good as the one you
+                would write.
+                  true  — a person chose these words. Thai or English both count.
+                          "สัญญาเช่าบ้าน-2569.pdf", "ใบเสร็จค่าน้ำ-มกราคม.pdf",
+                          "สลิปโอนเงิน-ทรูมันนี่-7พค.png", "Q2-sales-report-final.docx",
+                          "โจทย์เลข-บทที่3.pdf"
+                  false — a camera, scanner, screenshot tool or bot produced it.
+                          "IMG_0001.jpg", "DCIM_4567.png", "image_1755648000000.jpg",
+                          "Scan_20260101.pdf", "20260820_143022.jpg", "untitled.docx",
+                          "document (3).pdf", "photo.png"
+                  false — also when the name plainly contradicts what you see in the content.
+                CRITICAL: that YOUR filename would be more detailed, more specific, or would add
+                the amount / date / merchant is NOT a reason to return false. A human-typed name
+                is the words its owner chose to find it by; your extra precision does not
+                outrank that. Only device-generated names get replaced.
+                When you cannot tell who wrote it, return true.
 
 STRICT RULES (any violation = invalid response):
 - NEVER include a person's name, a pet's name, or any identifiable individual's name.
@@ -286,7 +291,6 @@ async function callClaude(
       date: knownDate,
       keywords: [],
       suggested_filename: buildFilename("document", "untitled", knownDate, ext),
-      keep_original: false,
       via: "fallback",
     };
   }
@@ -294,13 +298,21 @@ async function callClaude(
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error(`Claude non-JSON response: ${raw.slice(0, 200)}`);
 
-  const parsed = JSON.parse(jsonMatch[0]) as Partial<FileAnalysis>;
+  // `keep_original` is wire-only: the model answers it, we act on it here, and it
+  // never reaches callers.
+  const parsed = JSON.parse(jsonMatch[0]) as Partial<FileAnalysis> & {
+    keep_original?: boolean;
+  };
   const date = parsed.date ?? knownDate;
   const category = parsed.category ?? "document";
   const subject = parsed.subject ?? "untitled";
 
-  // Trust the model only when the name could plausibly be human-written. Guards
-  // against it being charmed by "image_1755648000000.jpg" into keeping camera noise.
+  // A boolean, then substituting the string ourselves — rather than asking the
+  // model to echo the filename back — because Thai names carry combining vowel
+  // and tone marks (\p{M}) that a re-emitted string can silently drop, and the
+  // result would be a subtly different filename. The second half of the check
+  // costs nothing (the helper is needed for the metadata paths regardless) and
+  // stops the model keeping camera noise like "image_1755648000000.jpg".
   const keepOriginal =
     parsed.keep_original === true && looksMeaningfulFilename(originalName);
 
@@ -311,14 +323,9 @@ async function callClaude(
     detail: parsed.detail ?? "",
     date,
     keywords: Array.isArray(parsed.keywords) ? parsed.keywords.filter((k) => typeof k === "string" && k.trim().length > 0).slice(0, 12) : [],
-    // Keeping the original name is expressed AS the suggestion, not by skipping the
-    // rename: callers derive IndexEntry.filename from the final key, and the raw key
-    // still carries the "{timestamp}-" upload prefix. Renaming to the original name
-    // strips it; skipping the rename would surface "1755648000000-สัญญาเช่าบ้าน.pdf".
     suggested_filename: keepOriginal
       ? originalName
       : (parsed.suggested_filename ?? buildFilename(category, subject, date, ext)),
-    keep_original: keepOriginal,
     via: "claude",
   };
 }
@@ -370,7 +377,6 @@ async function analyzeImage(buffer: Buffer, ext: string, originalName: string, o
       suggested_filename: keepOriginal
         ? originalName
         : buildFilename("photo", description, exifDate, ext),
-      keep_original: keepOriginal,
       via: "metadata",
     };
   }
@@ -385,7 +391,6 @@ async function analyzeImage(buffer: Buffer, ext: string, originalName: string, o
       date: exifDate,
       keywords: [],
       suggested_filename: buildFilename("photo", "untitled-photo", exifDate, ext),
-      keep_original: false,
       via: "fallback",
     };
   }
@@ -454,7 +459,6 @@ async function analyzePdf(buffer: Buffer, originalName: string, opts?: { anthrop
       suggested_filename: keepOriginal
         ? originalName
         : buildFilename(category, title, date, "pdf"),
-      keep_original: keepOriginal,
       via: "metadata",
     };
   }
@@ -501,7 +505,6 @@ async function analyzeDocx(buffer: Buffer, originalName: string, opts?: { anthro
       suggested_filename: keepOriginal
         ? originalName
         : buildFilename(category, title, date, "docx"),
-      keep_original: keepOriginal,
       via: "metadata",
     };
   }
