@@ -36,6 +36,7 @@ import {
   fetchLineContent,
   folderCreatedBubble,
   greetingBubble,
+  groupHelpBubble,
   GROUP_LEAVE_REPLY_TEXT,
   helpBubble,
   isGroupLeaveCommand,
@@ -65,6 +66,8 @@ import { analyzeFile } from "@/lib/analyzer";
 import { AI_FOLDERS, mapToAiFolder } from "@/lib/ai-folders";
 import {
   getAllEntries,
+  getAllWorkspaceEntries,
+  searchWorkspaceScored,
   upsertEntry,
   upsertWorkspaceEntry,
 } from "@/lib/search-index";
@@ -83,6 +86,7 @@ import {
   calculateRemindAt,
   formatDateThai,
   formatTimeThai,
+  looksLikeCalendarCommand,
   parseCalendarCommand,
 } from "@/lib/calendar";
 import { insertCalendarEvent } from "@/lib/db";
@@ -91,9 +95,14 @@ import {
   createGroupWorkspace,
   findWorkspaceByLineGroup,
   markOrphaned,
+  setWorkspaceQuiet,
   unmarkOrphaned,
   type WorkspaceMeta,
 } from "@/lib/workspace";
+import {
+  parseGroupCommand,
+  type GroupCommand,
+} from "@/lib/group-commands";
 
 // Background capture processing runs in `after()` past the 200 response — give
 // the function room beyond the default for transcript fetch + summarize + embed.
@@ -846,6 +855,87 @@ function parseAskCommand(text: string): string | null {
   return null;
 }
 
+// ── Group commands ─────────────────────────────────────────────────────────
+
+/**
+ * Run an explicit group command. Everything here is keyword-driven and cheap —
+ * no model calls — which is the whole point of having it in front of Ask.
+ */
+async function handleGroupCommand(
+  workspace: WorkspaceMeta,
+  cmd: GroupCommand,
+): Promise<LineMessage[]> {
+  const openRow = {
+    icon: "📂",
+    label: "เปิด DearFile / Open",
+    uri: liffUrl({ ws: workspace.id, tab: "home" }),
+  };
+
+  switch (cmd.kind) {
+    case "help":
+      return [groupHelpBubble(liffUrl({ ws: workspace.id }))];
+
+    case "quiet": {
+      await setWorkspaceQuiet(workspace.id, cmd.on);
+      return [
+        answerBubble(
+          cmd.on
+            ? "🦌 รับทราบแล้วพริ๊ๆ\n\nจะไม่ตอบกลับเวลาเซฟไฟล์แล้วนะ แต่การเซฟอัตโนมัติยังทำงานอยู่ตามปกติ เข้าดูไฟล์ได้ที่ปุ่มนี้เลย\n\nอยากให้ตอบกลับอีกครั้ง พิมพ์ \"!น้องกวาง เปิดการตอบกลับ\""
+            : "🦌 เปิดการตอบกลับแล้ว\n\nจะทักทุกครั้งที่เซฟไฟล์ให้เหมือนเดิมนะ",
+          [openRow],
+        ),
+      ];
+    }
+
+    case "status": {
+      const entries = await getAllWorkspaceEntries(workspace.id);
+      const quiet = workspace.quiet ?? false;
+      return [
+        answerBubble(
+          [
+            `📊 ${workspace.name}`,
+            "",
+            `📄 ไฟล์ทั้งหมด: ${entries.length}`,
+            `👥 สมาชิก: ${workspace.members.length}`,
+            `${quiet ? "🔕" : "🔔"} ตอบกลับตอนเซฟไฟล์: ${quiet ? "ปิด" : "เปิด"}`,
+            "",
+            quiet
+              ? 'เปิดกลับ: "!น้องกวาง เปิดการตอบกลับ"'
+              : 'ปิดเสียง: "!น้องกวาง ปิดการตอบกลับ"',
+          ].join("\n"),
+          [openRow],
+        ),
+      ];
+    }
+
+    case "search": {
+      const hits = await searchWorkspaceScored(workspace.id, cmd.query, {
+        sort: "relevance",
+      });
+      if (hits.length === 0) {
+        return [
+          answerBubble(`🔍 ไม่เจอไฟล์ที่ตรงกับ "${cmd.query}"`, [openRow]),
+        ];
+      }
+      // answerBubble caps at 3 rows, so say what's not shown.
+      const header =
+        hits.length > 3
+          ? `🔍 เจอ ${hits.length} ไฟล์ · แสดง 3 อันดับแรก`
+          : `🔍 เจอ ${hits.length} ไฟล์`;
+      return [
+        answerBubble(
+          header,
+          hits.slice(0, 3).map((e) => ({
+            icon: "📄",
+            label: e.filename,
+            uri: liffUrl({ file: e.key, ws: workspace.id }),
+          })),
+        ),
+      ];
+    }
+  }
+}
+
 // ── Daily summary (on-demand) ──────────────────────────────────────────────
 
 // Whole-message triggers for an on-demand "today's recap". Kept tight (exact
@@ -1201,17 +1291,14 @@ async function handleMessageEvent(
     if (msg.type === "text") {
       const text = msg.text ?? "";
 
-      // Calendar commands are DM-only. Politely inform group users.
-      const calEvent = await parseCalendarCommand(text, userId);
-      if (calEvent) {
-        return [
-          {
-            type: "text",
-            text:
-              "📅 ปฏิทินใช้ได้เฉพาะแชทส่วนตัวนะ ลองส่งข้อความมาที่ DM\n" +
-              "Calendar works in DM only. Please message me directly to add events.",
-          },
-        ];
+      // Parsed once and reused: it's both the group-command front door and,
+      // failing that, the Ask question.
+      const question = parseAskCommand(text);
+
+      // Explicit commands first — pure string matching, no model, no S3.
+      if (question !== null) {
+        const cmd = parseGroupCommand(question);
+        if (cmd) return handleGroupCommand(workspace, cmd);
       }
 
       // Kick command — bot leaves the group with a witty one-liner.
@@ -1236,10 +1323,23 @@ async function handleMessageEvent(
       const folderResp = await handleFolderCommand(workspace, userId, text);
       if (folderResp) return folderResp;
 
+      // Calendar is DM-only, so a keyword check is enough to say so. Calling the
+      // LLM parser here would spend a Haiku round trip on every group message
+      // just to reach the same "not here" reply.
+      if (looksLikeCalendarCommand(text)) {
+        return [
+          {
+            type: "text",
+            text:
+              "📅 ปฏิทินใช้ได้เฉพาะแชทส่วนตัวนะ ลองส่งข้อความมาที่ DM\n" +
+              "Calendar works in DM only. Please message me directly to add events.",
+          },
+        ];
+      }
+
       // Ask is opt-in in groups: only answer when explicitly addressed with a
       // sigil + trigger (/dearfile · !dearfile · /น้องกวาง · !น้องกวาง). Other
       // chatter stays silent — don't be a chatbot in busy rooms.
-      const question = parseAskCommand(text);
       if (question === null) return null;
       if (question.length === 0) {
         // Bare trigger with no question — confirm we're listening + show how.
@@ -1268,6 +1368,12 @@ async function handleMessageEvent(
       try {
         const outcome = await saveWorkspaceFileMessage(workspace, userId, msg);
         if (!outcome.ok) return [outcome.message];
+
+        // Quiet mode silences the success card only — failures above still speak
+        // up, and command acks (including the quiet toggle itself) are a separate
+        // path. Gating here rather than at flush time also skips the pending-item
+        // write, the 6s after() hold and the whole lock/list/delete dance.
+        if (workspace.quiet) return null;
 
         const target: UploadBatchTarget = {
           kind: "workspace",
@@ -1562,18 +1668,21 @@ async function handleBatchedFileUploads(
       );
       const response: LineMessage[] = [];
 
-      if (uploads.length > 1) {
-        response.push(
-          uploadBatchSuccessBubble({
-            files: uploads,
-            liffUrl: workspace
-              ? liffUrl({ ws: workspace.id, tab: "home" })
-              : liffUrl(),
-            workspaceName: workspace?.name,
-          }),
-        );
-      } else if (uploads.length === 1) {
-        response.push(uploadSuccessBubble(uploads[0]));
+      // `workspace` is null on the DM branch, so quiet mode never applies there.
+      if (!workspace?.quiet) {
+        if (uploads.length > 1) {
+          response.push(
+            uploadBatchSuccessBubble({
+              files: uploads,
+              liffUrl: workspace
+                ? liffUrl({ ws: workspace.id, tab: "home" })
+                : liffUrl(),
+              workspaceName: workspace?.name,
+            }),
+          );
+        } else if (uploads.length === 1) {
+          response.push(uploadSuccessBubble(uploads[0]));
+        }
       }
 
       if (errors.length > 0) {
@@ -1667,6 +1776,7 @@ export async function POST(req: Request) {
         // empty-string member).
         if (event.type === "join") {
           const { groupId, userId } = getSourceContext(event);
+          let joinedWsId: string | null = null;
           if (groupId && userId) {
             const summary = await fetchGroupSummary(groupId);
             const ws = await createGroupWorkspace({
@@ -1674,6 +1784,7 @@ export async function POST(req: Request) {
               ownerId: userId,
               name: summary?.groupName,
             });
+            joinedWsId = ws.id;
             // Re-join: if the workspace was previously orphaned (bot was
             // kicked or self-left via the kick command), clear the flag so
             // the message handler at line ~824 doesn't bounce every
@@ -1684,8 +1795,12 @@ export async function POST(req: Request) {
             }
           }
           if (event.replyToken) {
+            // Carry `ws` so the very first tap from this group lands in this
+            // group's workspace, not whichever one the tapper used last.
             await replyMessage(event.replyToken, [
-              welcomeBubble(url, { forGroup: true }),
+              welcomeBubble(joinedWsId ? liffUrl({ ws: joinedWsId }) : url, {
+                forGroup: true,
+              }),
             ]);
           }
           return;

@@ -69,6 +69,7 @@ export interface WorkspaceMeta {
   members: WorkspaceMember[];
   lineGroupId: string | null;
   orphaned?: boolean;        // bot was removed from the bound LINE group
+  quiet?: boolean;           // group asked the bot to stop confirming saved uploads
   createdAt: string;
   updatedAt: string;
 }
@@ -457,6 +458,24 @@ export function unmarkOrphaned(workspaceId: string): Promise<WorkspaceMeta | nul
       throw err;
     }
   });
+}
+
+/**
+ * Quiet mode: stop replying with the "saved ✓" card after every upload. Files
+ * are still saved, analyzed and indexed exactly as before — only the chatter
+ * stops. Set from the group chat (`!น้องกวาง ตั้งค่า ปิดการตอบกลับ`) or the
+ * workspace settings sheet in the LIFF.
+ */
+export function setWorkspaceQuiet(
+  workspaceId: string,
+  quiet: boolean,
+): Promise<WorkspaceMeta> {
+  return withLock(metaLocks, workspaceId, () =>
+    mutateMeta(workspaceId, (m) => {
+      if ((m.quiet ?? false) === quiet) return META_SKIP;
+      m.quiet = quiet;
+    }),
+  );
 }
 
 // ── Folder permission lookup ──────────────────────────────────────────────

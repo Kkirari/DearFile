@@ -194,6 +194,29 @@ export async function fetchGroupSummary(
 }
 
 /**
+ * Is this user actually in this LINE group? Asks LINE rather than trusting the
+ * caller — the LIFF client supplies its own groupId, and the answer decides
+ * whether we auto-join someone into that group's workspace.
+ *
+ * Returns false on any non-200 (404 = not a member, and a transient error should
+ * deny rather than grant access).
+ */
+export async function isGroupMember(
+  groupId: string,
+  userId: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(
+      `https://api.line.me/v2/bot/group/${groupId}/member/${userId}`,
+      { headers: { Authorization: `Bearer ${accessToken()}` } },
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Fetch a LINE user's profile (display name, picture URL, status message).
  * Returns null if the user hasn't friended the bot or the profile is inaccessible.
  */
@@ -566,6 +589,127 @@ export function examplesBubble(liffUrl: string): LineFlexMessage {
               label: "เปิด DearFile",
               uri: liffUrl,
             },
+          },
+        ],
+      },
+    },
+  };
+}
+
+/** One command row in the group help bubble. */
+function commandRow(
+  icon: string,
+  label: string,
+  syntax: string,
+): Record<string, unknown> {
+  return {
+    type: "box",
+    layout: "horizontal",
+    spacing: "md",
+    alignItems: "center",
+    margin: "md",
+    contents: [
+      { type: "text", text: icon, size: "lg", flex: 0 },
+      {
+        type: "box",
+        layout: "vertical",
+        flex: 1,
+        spacing: "xs",
+        contents: [
+          {
+            type: "text",
+            text: label,
+            weight: "bold",
+            color: TEXT_DARK_WARM,
+            size: "sm",
+            wrap: true,
+          },
+          {
+            type: "text",
+            text: syntax,
+            color: BRAND_MAUVE,
+            size: "xs",
+            wrap: true,
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * The full group command menu — the answer to `!น้องกวาง ช่วยเหลือ`.
+ *
+ * Distinct from `helpBubble`, which is DM onboarding copy ("send me a file") and
+ * lists no commands.
+ */
+export function groupHelpBubble(liffUrl: string): LineFlexMessage {
+  return {
+    type: "flex",
+    altText: "คำสั่งน้องกวางในกลุ่ม / DearFile group commands",
+    contents: {
+      type: "bubble",
+      size: "kilo",
+      styles: {
+        header: { backgroundColor: BRAND_MAUVE },
+        body: { backgroundColor: CARD_CREAM },
+        footer: { backgroundColor: CARD_CREAM },
+      },
+      header: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "20px",
+        contents: [
+          {
+            type: "text",
+            text: "🦌 คำสั่งในกลุ่ม",
+            weight: "bold",
+            color: "#FFFFFF",
+            size: "lg",
+            wrap: true,
+          },
+          {
+            type: "text",
+            text: "ขึ้นต้นด้วย !น้องกวาง หรือ /น้องกวาง ก็ได้",
+            color: "#FFFFFFCC",
+            size: "xs",
+            margin: "sm",
+            wrap: true,
+          },
+        ],
+      },
+      body: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        contents: [
+          {
+            type: "text",
+            text: "ส่งไฟล์เข้ากลุ่มได้เลย น้องกวางเก็บให้อัตโนมัติ",
+            color: TEXT_TAUPE,
+            size: "xs",
+            wrap: true,
+          },
+          { type: "separator", margin: "md", color: BORDER_BEIGE },
+          commandRow("🔍", "ค้นหาไฟล์ในกลุ่ม", "!น้องกวาง ค้นหา ใบเสร็จ"),
+          commandRow("💬", "ถามอะไรก็ได้เกี่ยวกับไฟล์", "!น้องกวาง สรุปสัญญาให้หน่อย"),
+          commandRow("📁", "สร้างโฟลเดอร์", "!น้องกวาง สร้างโฟลเดอร์ ชื่อโฟลเดอร์"),
+          commandRow("🔕", "ปิด/เปิดการตอบกลับตอนเซฟไฟล์", "!น้องกวาง ตั้งค่า ปิดการตอบกลับ"),
+          commandRow("📊", "ดูสถานะกลุ่มนี้", "!น้องกวาง สถานะ"),
+        ],
+      },
+      footer: {
+        type: "box",
+        layout: "vertical",
+        paddingAll: "16px",
+        paddingTop: "0px",
+        contents: [
+          {
+            type: "button",
+            style: "primary",
+            color: BRAND_MAUVE,
+            height: "sm",
+            action: { type: "uri", label: "เปิด DearFile", uri: liffUrl },
           },
         ],
       },

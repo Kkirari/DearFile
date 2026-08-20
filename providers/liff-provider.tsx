@@ -9,6 +9,13 @@ type LiffState = {
   loggedIn: boolean;
   profile: Profile | null;
   error: string | null;
+  /**
+   * The LINE group this LIFF was opened from, when it was opened from a group
+   * chat inside the LINE app. `null` in DMs and in an external browser — the
+   * workspace then falls back to the last-used one. Rooms are ignored: the bot
+   * never binds a workspace to a room, so there'd be nothing to resolve.
+   */
+  groupId: string | null;
   login: () => void;
   logout: () => void;
 };
@@ -18,6 +25,7 @@ const LiffContext = createContext<LiffState>({
   loggedIn: false,
   profile: null,
   error: null,
+  groupId: null,
   login: () => {},
   logout: () => {},
 });
@@ -52,6 +60,7 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
   const [loggedIn, setLoggedIn] = useState(false);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [groupId, setGroupId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -87,7 +96,13 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
         await liff.init({ liffId });
         const isLoggedIn = liff.isLoggedIn();
         console.log("[LIFF] init success — isLoggedIn:", isLoggedIn);
-        console.log("[LIFF] context:", liff.getContext());
+        // Capture before the not-logged-in early return so the group survives
+        // a login round trip.
+        const ctx = liff.getContext();
+        console.log("[LIFF] context:", ctx);
+        if (!cancelled) {
+          setGroupId(ctx?.type === "group" ? (ctx.groupId ?? null) : null);
+        }
 
         if (!isLoggedIn) {
           console.log("[LIFF] not logged in → redirecting to LINE login...");
@@ -148,7 +163,7 @@ export function LiffProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <LiffContext.Provider
-      value={{ ready, loggedIn, profile, error, login, logout }}
+      value={{ ready, loggedIn, profile, error, groupId, login, logout }}
     >
       {children}
     </LiffContext.Provider>

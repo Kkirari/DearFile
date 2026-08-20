@@ -24,6 +24,7 @@ import {
   type ReactNode,
 } from "react";
 import { apiFetch } from "@/lib/api-client";
+import { useLiff } from "./liff-provider";
 
 export interface WorkspaceSummary {
   id: string;
@@ -32,6 +33,7 @@ export interface WorkspaceSummary {
   memberCount: number;
   lineGroupId: string | null;
   orphaned: boolean;
+  quiet: boolean;
   updatedAt: string;
 }
 
@@ -48,17 +50,40 @@ const WorkspaceContext = createContext<WorkspaceContextValue | null>(null);
 
 const STORAGE_KEY = "dearfile.currentWorkspaceId";
 
+/**
+ * Which workspace should the app open in? In priority order:
+ *
+ *   1. `?ws=` on the URL — an explicit deep link from a bot bubble. Read here in
+ *      the lazy initializer so it lands before first paint; otherwise every
+ *      workspace-scoped hook fires its first request against the stale value.
+ *   2. The LINE group the LIFF was opened from — resolved asynchronously below,
+ *      since `liff.getContext()` isn't available until LIFF finishes init.
+ *   3. Whatever was used last.
+ */
+function initialWorkspaceId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const ws = new URLSearchParams(window.location.search).get("ws");
+    if (ws) {
+      window.localStorage.setItem(STORAGE_KEY, ws);
+      return ws;
+    }
+    return window.localStorage.getItem(STORAGE_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
+  const { ready, groupId } = useLiff();
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [currentWorkspaceId, _setCurrentWorkspaceId] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      return window.localStorage.getItem(STORAGE_KEY) || null;
-    } catch {
-      return null;
-    }
-  });
+  // True until the group-context lookup has settled, so the self-heal effect
+  // below can't wipe a workspace we're in the middle of resolving.
+  const [resolvingGroup, setResolvingGroup] = useState(true);
+  const [currentWorkspaceId, _setCurrentWorkspaceId] = useState<string | null>(
+    initialWorkspaceId,
+  );
 
   const setCurrentWorkspace = useCallback((id: string | null) => {
     _setCurrentWorkspaceId(id);
@@ -87,16 +112,50 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
+  // Opened from inside a LINE group → switch to that group's workspace. An
+  // explicit `?ws=` deep link outranks it and was already applied synchronously.
+  useEffect(() => {
+    if (!ready) return;   // groupId is null until LIFF init lands — don't settle early
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const explicit =
+          new URLSearchParams(window.location.search).get("ws");
+        if (explicit || !groupId) return;
+
+        const res = await apiFetch(
+          `/api/workspaces/by-group?groupId=${encodeURIComponent(groupId)}`,
+        );
+        if (!res.ok) return;
+        const data = await res.json() as { workspace?: { id: string } | null };
+        if (cancelled || !data.workspace?.id) return;
+
+        setCurrentWorkspace(data.workspace.id);
+        // Must await: the lookup may have just auto-joined this user, and the
+        // self-heal effect below would otherwise drop the id for not being in
+        // the stale list.
+        await refresh();
+      } catch {
+        /* keep whatever we had — worst case the last-used workspace */
+      } finally {
+        if (!cancelled) setResolvingGroup(false);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [ready, groupId, setCurrentWorkspace, refresh]);
+
   // Auto-fall-back to personal if the cached workspaceId isn't in the
   // current member list (e.g. was removed).
   useEffect(() => {
     if (!currentWorkspaceId) return;
-    if (loading) return;
+    if (loading || resolvingGroup) return;
     if (!workspaces.some((w) => w.id === currentWorkspaceId)) {
       _setCurrentWorkspaceId(null);
       try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
     }
-  }, [currentWorkspaceId, workspaces, loading]);
+  }, [currentWorkspaceId, workspaces, loading, resolvingGroup]);
 
   const currentWorkspace = useMemo(
     () => workspaces.find((w) => w.id === currentWorkspaceId) ?? null,

@@ -12,6 +12,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  Bell,
+  BellOff,
   Check,
   Copy,
   Edit3,
@@ -161,6 +163,33 @@ export function WorkspaceSettingsSheet({ workspace, onClose }: WorkspaceSettings
     } catch (e) {
       setError(e instanceof Error ? e.message : "Rename failed");
       setNameDraft(workspace.name);
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  // ── Quiet mode ─────────────────────────────────────────────────────
+  //
+  // Any member can flip this, not just the owner — a group workspace's owner is
+  // just whoever first triggered its creation and may have left, and the LINE
+  // chat command is open to every member already.
+
+  async function toggleQuiet() {
+    setBusy("quiet");
+    setError(null);
+    try {
+      const res = await apiFetch(`/api/workspaces/${workspace.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quiet: !workspace.quiet }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error ?? `Update failed (${res.status})`);
+      }
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Update failed");
     } finally {
       setBusy(null);
     }
@@ -367,6 +396,45 @@ export function WorkspaceSettingsSheet({ workspace, onClose }: WorkspaceSettings
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/30 dark:border-red-900/40 px-3.5 py-2.5 text-[12px] text-red-600 dark:text-red-400">
             {error}
           </div>
+        )}
+
+        {/* Quiet mode — only meaningful for a workspace bound to a LINE group */}
+        {workspace.lineGroupId && (
+          <section className="mb-5">
+            <h4 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-[#b0a396] dark:text-[#6e6460]">
+              Group chat
+            </h4>
+            <button
+              onClick={toggleQuiet}
+              disabled={busy === "quiet"}
+              className="flex w-full items-center gap-3 rounded-xl border border-[#e0d8cc] dark:border-[#3a3532] px-3.5 py-3 text-left active:scale-[0.99] disabled:opacity-50"
+            >
+              {workspace.quiet ? (
+                <BellOff size={18} className="shrink-0 text-[#9b869c]" />
+              ) : (
+                <Bell size={18} className="shrink-0 text-[#9b869c]" />
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="text-[13.5px] font-semibold text-[#4a4036] dark:text-[#e8e2da]">
+                  ตอบกลับตอนเซฟไฟล์
+                </div>
+                <div className="text-[11.5px] text-[#b0a396] dark:text-[#6e6460]">
+                  {workspace.quiet
+                    ? "ปิดอยู่ — ยังเซฟไฟล์ให้ตามปกติ แค่ไม่ทักในกลุ่ม"
+                    : "เปิดอยู่ — ทักทุกครั้งที่เซฟไฟล์ให้"}
+                </div>
+              </div>
+              <span
+                className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                  workspace.quiet
+                    ? "bg-[#f0ece4] text-[#b0a396] dark:bg-[#2a2624] dark:text-[#6e6460]"
+                    : "bg-[#9b869c] text-white"
+                }`}
+              >
+                {workspace.quiet ? "ปิด" : "เปิด"}
+              </span>
+            </button>
+          </section>
         )}
 
         {/* Invites (owner only) */}

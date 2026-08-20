@@ -24,6 +24,7 @@ interface WorkspaceSummary {
   memberCount: number;
   lineGroupId: string | null;
   orphaned: boolean;
+  quiet: boolean;
   updatedAt: string;
 }
 
@@ -56,6 +57,7 @@ export async function GET(req: Request) {
         memberCount: meta.members.length,
         lineGroupId: meta.lineGroupId,
         orphaned:    meta.orphaned ?? false,
+        quiet:       meta.quiet ?? false,
         updatedAt:   meta.updatedAt,
       });
     }

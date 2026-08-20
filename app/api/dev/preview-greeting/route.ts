@@ -15,10 +15,16 @@
  *   open http://localhost:8000/api/dev/preview-greeting?b=kick     (kick-hint reply)
  *   open http://localhost:8000/api/dev/preview-greeting?b=success
  *   open http://localhost:8000/api/dev/preview-greeting?b=help
+ *   open http://localhost:8000/api/dev/preview-greeting?b=grouphelp (group command menu)
+ *   open http://localhost:8000/api/dev/preview-greeting?b=status    (group status)
+ *   open http://localhost:8000/api/dev/preview-greeting?b=quiet     (quiet-mode ack)
+ *   open http://localhost:8000/api/dev/preview-greeting?b=search    (search results)
  */
 
 import {
+  answerBubble,
   examplesBubble,
+  groupHelpBubble,
   helpBubble,
   kickHintBubble,
   uploadSuccessBubble,
@@ -51,6 +57,36 @@ export async function GET(req: Request) {
       ? examplesBubble(liffUrl)
       : which === "kick"
       ? kickHintBubble(liffUrl)
+      : which === "grouphelp"
+      ? groupHelpBubble(liffUrl)
+      : which === "status"
+      ? answerBubble(
+          [
+            "📊 Team Finance",
+            "",
+            "📄 ไฟล์ทั้งหมด: 128",
+            "👥 สมาชิก: 6",
+            "🔕 ตอบกลับตอนเซฟไฟล์: ปิด",
+            "",
+            'เปิดกลับ: "!น้องกวาง เปิดการตอบกลับ"',
+          ].join("\n"),
+          [{ icon: "📂", label: "เปิด DearFile / Open", uri: liffUrl }],
+        )
+      : which === "quiet"
+      ? answerBubble(
+          `🦌 รับทราบแล้วพริ๊ๆ
+
+จะไม่ตอบกลับเวลาเซฟไฟล์แล้วนะ แต่การเซฟอัตโนมัติยังทำงานอยู่ตามปกติ เข้าดูไฟล์ได้ที่ปุ่มนี้เลย
+
+อยากให้ตอบกลับอีกครั้ง พิมพ์ "!น้องกวาง เปิดการตอบกลับ"`,
+          [{ icon: "📂", label: "เปิด DearFile / Open", uri: liffUrl }],
+        )
+      : which === "search"
+      ? answerBubble("🔍 เจอ 12 ไฟล์ · แสดง 3 อันดับแรก", [
+          { icon: "📄", label: "ใบเสร็จค่าน้ำ-มกราคม.pdf", uri: liffUrl },
+          { icon: "📄", label: "finance_starbucks-receipt_18-5-26.jpg", uri: liffUrl },
+          { icon: "📄", label: "ใบแจ้งหนี้-ค่าไฟฟ้า-กุมภาพันธ์.pdf", uri: liffUrl },
+        ])
       : welcomeBubble(liffUrl);
 
   return Response.json(message.contents, {

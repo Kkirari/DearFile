@@ -32,6 +32,36 @@ const CalendarParseSchema = z.object({
 });
 
 /**
+ * Phrases that mean "this is about the calendar". Interpolated into the parser
+ * prompt below so there is one list, and exported via `looksLikeCalendarCommand`
+ * for callers that only need a yes/no and shouldn't pay for a model round trip.
+ */
+const CALENDAR_TRIGGERS = [
+  "เพิ่มปฎิทิน",
+  "เพิ่มปฏิทิน",
+  "ตั้งเตือน",
+  "เตือนวันที่",
+  "นัดวันที่",
+  "บันทึกปฏิทิน",
+  "add calendar",
+  "add to calendar",
+  "remind me on",
+  "set reminder",
+  "schedule",
+];
+
+/**
+ * Cheap "is this calendar-ish?" check — no model, no network.
+ *
+ * `includes`, not `startsWith`: Thai users lead with the date ("วันที่ 6
+ * เพิ่มปฏิทินว่า…") as often as with the verb.
+ */
+export function looksLikeCalendarCommand(text: string): boolean {
+  const t = (text ?? "").toLowerCase();
+  return CALENDAR_TRIGGERS.some((p) => t.includes(p.toLowerCase()));
+}
+
+/**
  * ICT (Asia/Bangkok) date string in YYYY-MM-DD format for "today".
  */
 function todayICT(): string {
@@ -61,8 +91,7 @@ User timezone: Asia/Bangkok (ICT, UTC+7)
 Parse the user's message into a calendar event. Return isCalendarCommand=false if it's not a calendar/reminder request.
 
 **Trigger phrases:**
-Thai: เพิ่มปฎิทิน, เพิ่มปฏิทิน, ตั้งเตือน, เตือนวันที่, นัดวันที่, บันทึกปฏิทิน
-English: add calendar, add to calendar, remind me on, set reminder, schedule
+${CALENDAR_TRIGGERS.join(", ")}
 
 **Date formats to recognize:**
 - "วันที่ 6 เดือน7" → 2026-07-06
